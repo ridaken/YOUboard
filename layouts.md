@@ -24,16 +24,16 @@ If the layout has exactly 2 keys in the bottom row, these keys will replace comm
 ## Json format
 * Normal json layout with [lenient](https://kotlinlang.org/api/kotlinx.serialization/kotlinx-serialization-json/kotlinx.serialization.json/-json-builder/is-lenient.html) parsing, and ignoring lines starting with `//`.
   * For anything else than small changes and copy/pasting text the in-app editor is unsuitable. A proper text editor (e.g. Kate or Notepad++) can significantly simplify work on json files.
-  * Roccobot's Layout Maker is a browser-based editor for json layout files. You can find it [here](https://roccobot.github.io/HeliBoard-RLM/), or in the [discussion section](https://github.com/HeliBorg/HeliBoard/discussions/2494).
+  * Roccobot's Layout Maker is a browser-based editor for json layout files. You can find it [here](https://roccobot.github.io/YOUBoard-RLM/), or in the [discussion section](https://github.com/HeliBorg/HeliBoard/discussions/2494).
 * Allows more flexibility than the simple format, e.g. changing keys depending on input type, shift state or layout direction
 * You can use character layouts from [FlorisBoard](https://github.com/florisboard/florisboard/blob/master/CONTRIBUTING.md#adding-the-layout)
   * Support is not 100% there yet, notably `kana_selector` and `char_width_selector` do not work.
 * There is no need for specifying a `code`, it will be determined from the label automatically
-  * You can still specify it, but it's only necessary if you want key label and code to be different (please avoid contributing layout with unnecessary codes to HeliBoard)
+  * You can still specify it, but it's only necessary if you want key label and code to be different (please avoid contributing layout with unnecessary codes to YOUBoard)
   * Note that not all _special codes_ (negative numbers) from FlorisBoard are supported
-* Key classes: specified with `$`, usually you can omit them in HeliBoard 
+* Key classes: specified with `$`, usually you can omit them in YOUBoard 
   * `text_key`: normal key, default
-  * `auto_text_key`: used in FlorisBoard for a key that changes text case when shift is enabled, HeliBoard does that anyway unless disabled with a _labelFlag_
+  * `auto_text_key`: used in FlorisBoard for a key that changes text case when shift is enabled, YOUBoard does that anyway unless disabled with a _labelFlag_
   * `multi_text_key`: key with an array of code points, e.g. `{ "$": "multi_text_key", "codePoints": [2509, 2480], "label": "্র" }`
   * there are also selector classes, which allow to change keys conditionally, see the [dvorak layout](app/src/main/assets/layouts/main/dvorak.json) for an example:
     * `case_selector`: keys for `lower` and `upper` (both mandatory), similar to `shift_state_selector`
@@ -44,7 +44,7 @@ If the layout has exactly 2 keys in the bottom row, these keys will replace comm
     * `layout_direction_selector`: keys for `ltr` and `rtl` (both mandatory)
 ### Properties
 * A (non-selector) key can have the following properties:
-* `type`: only specific values, HeliBoard mostly uses this to determine background color and type, determined automatically by default
+* `type`: only specific values, YOUBoard mostly uses this to determine background color and type, determined automatically by default
   * `normal`: normal key color
   * `function`: functional key color
   * `space`: space bar color
@@ -54,7 +54,7 @@ If the layout has exactly 2 keys in the bottom row, these keys will replace comm
   * `numeric`: normal key color, only in number layouts: sets default width to `-1` and sets default label flags if none specified
   * There are some more values, but they do nothing
 * `code`: code point that is entered when the key is pressed, determined from the label by default, not available for `multi_text_key`
-  * There are special negative values available, e.g. the ones used by functional keys, see [KeyCode.kt](/app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/floris/KeyCode.kt). There are several not yet supported key codes in there, you can see in the function `checkAndConvertCode` which ones are working.
+  * There are special negative values available, e.g. the ones used by functional keys, see [KeyCode.kt](/app/src/main/java/com/youboard/keyboard/keyboard/internal/keyboard_parser/floris/KeyCode.kt). There are several not yet supported key codes in there, you can see in the function `checkAndConvertCode` which ones are working.
   * Notes for the modifier keys `CTRL`, `ALT`, `FN`, `META` and the left/right/lock versions
     * The lock versions (`CTRL_LOCK`, `ALT_LOCK`, `FN_LOCK`, `META_LOCK`) will stay active until pressed again. The normal versions will stay active until released or a code input happens (whatever comes later). Avoid having both lock and non-lock versions of the same key on a keyboard, they interact badly.
     * Some applications will only react to a specific `_LEFT` or `_RIGHT` version of a meta key
@@ -99,14 +99,14 @@ Usually the label is what is displayed on the key. However, there are some speci
   * _comma_: `,` key with special popups, will adapt to language-specific comma, or display `/` in URL fields and `@` in email fields
   * _space_: space key, with icon when using a number layout
   * _zwnj_: Zero-width non-joiner (automatically added next to space in alphabet layout for some languages)
-  * You can also use [toolbar keys](/app/src/main/java/helium314/keyboard/latin/utils/ToolbarUtils.kt#L109), e.g. _undo_.
-  * See [KeyLabel.kt](app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/floris/KeyLabel.kt) for more available labels that are parsed to the corresponding key.
+  * You can also use [toolbar keys](/app/src/main/java/com/youboard/keyboard/latin/utils/ToolbarUtils.kt#L109), e.g. _undo_.
+  * See [KeyLabel.kt](app/src/main/java/com/youboard/keyboard/keyboard/internal/keyboard_parser/floris/KeyLabel.kt) for more available labels that are parsed to the corresponding key.
 * In case a label clashes with text you want to add, put a `\` in front of the text you want, e.g. `\space` will write the label `space` instead of adding a space bar.
   * Note that you need to escape the `\` in json files by adding a second `\`.
 * If you want different key label and input text, set the label to [label]|[text], e.g. `aa|bb` will show `aa`, but pressing the key will input `bb`.
 You can also specify special key codes like `a|!code/key_action_previous` or `abc|!code/-10043`, but it's cleaner to use a json layout and specify the code explicitly. Note that when specifying a code in the label, and a code in a json layout, the code in the label will be ignored.
 * It's also possible to specify an icon, like `!icon/previous_key|!code/key_action_previous`.
-  * You can find available icon names in [KeyboardIconsSet](/app/src/main/java/helium314/keyboard/keyboard/internal/KeyboardIconsSet.kt). You can also use toolbar key icons using the uppercase name of the [toolbar key](/app/src/main/java/helium314/keyboard/latin/utils/ToolbarUtils.kt#L109), e.g. `!icon/redo`
+  * You can find available icon names in [KeyboardIconsSet](/app/src/main/java/com/youboard/keyboard/keyboard/internal/KeyboardIconsSet.kt). You can also use toolbar key icons using the uppercase name of the [toolbar key](/app/src/main/java/com/youboard/keyboard/latin/utils/ToolbarUtils.kt#L109), e.g. `!icon/redo`
 * There are some further special labels to be used in popup keys (i.e. one of the popup keys should have the label)
   * `!noPanelAutoPopupKey!`: no popups are shown, a long press will result in the first normal popup of the key being selected
   * `!needsDividers!`: dividers are shown between popup keys
@@ -132,8 +132,8 @@ You can also specify special key codes like `a|!code/key_action_previous` or `ab
   * `[number_row]` may contain a custom number row (1-9 and 0 separated by space).
   * `[extra_keys]` are typically keys shown in the default layout of the language. This is currently only used for latin layouts to avoid duplicating layouts for just adding few keys on the right side. The layout name need to end with `+`, but the `+` is removed when looking up the actual layout.
 * If you add a new language for which Android does not have a display name, it will be displayed using the language tag
-  * To fix this, add the language to [`strings.xml`](/app/src/main/res/values/strings.xml) (common names are `subtype_<langage tag>`), and then in [LocaleUtils.localizedDisplayName](/app/src/main/java/helium314/keyboard/latin/common/LocaleUtils.kt#L179) add an `overrideRedId` for the language tag. For overriding the language name displayed on space bar, you need to add the language tag to `subtype_locale_displayed_in_root_locale`, and the name to `subtype_locale_displayed_in_root_locale_display_names` in [donottranslate.xml](/app/src/main/res/values/donottranslate.xml).
-* If a newly added language does not use latin script, please update the default scripts method `Locale.script` in [ScriptUtils](app/src/main/java/helium314/keyboard/latin/utils/ScriptUtils.kt)
+  * To fix this, add the language to [`strings.xml`](/app/src/main/res/values/strings.xml) (common names are `subtype_<langage tag>`), and then in [LocaleUtils.localizedDisplayName](/app/src/main/java/com/youboard/keyboard/latin/common/LocaleUtils.kt#L179) add an `overrideRedId` for the language tag. For overriding the language name displayed on space bar, you need to add the language tag to `subtype_locale_displayed_in_root_locale`, and the name to `subtype_locale_displayed_in_root_locale_display_names` in [donottranslate.xml](/app/src/main/res/values/donottranslate.xml).
+* If a newly added language does not use latin script, please update the default scripts method `Locale.script` in [ScriptUtils](app/src/main/java/com/youboard/keyboard/latin/utils/ScriptUtils.kt)
 
 ## Functional key layouts
 Customizing functional keys mostly works like other layouts, with some specific adjustments:

@@ -1,6 +1,6 @@
 # Getting Started
 
-HeliBoard project is based on Gradle and Android Gradle Plugin. To get started, you can install [Android Studio](https://developer.android.com/studio), and import project 'from Version Control / Git / Github' by providing this git repository [URL](https://github.com/HeliBorg/HeliBoard) (or git SSH [URL](git@github.com:Helium314/heliboard.git)).
+YOUBoard project is based on Gradle and Android Gradle Plugin. To get started, you can install [Android Studio](https://developer.android.com/studio), and import project 'from Version Control / Git / Github' by providing this git repository [URL](https://github.com/HeliBorg/HeliBoard) (or git SSH [URL](git@github.com:Helium314/heliboard.git)).
 Of course you can also use any other compatible IDE, or work with text editor and command line.
 Once everything is up correctly, you're ready to go!
 
@@ -8,7 +8,7 @@ If you have difficulties implementing some functionality, you're welcome to ask 
 
 # About the Code
 
-HeliBoard is based on AOSP keyboard, and in many places still contains mostly the original code. There are some extensions, and some parts have been replaced completely.
+YOUBoard is based on AOSP keyboard, and in many places still contains mostly the original code. There are some extensions, and some parts have been replaced completely.
 When working on this app, you will likely notice its rather large size, and quite different code styles and often ancient comments and _TODO_s, where the latter are typically untouched since AOSP times.
 Unfortunately a lot of the old code is hard to read or to fully understand with all of its intended (and unintended) consequences.
 
@@ -40,11 +40,11 @@ What will likely take some time (depends very much on how much other stuff is co
 
 ## Recommended
 
-If you want to contribute, it's a good idea to make sure your idea is actually wanted in HeliBoard.
+If you want to contribute, it's a good idea to make sure your idea is actually wanted in YOUBoard.
 Best check related issues before you start working on a PR. If the issue has the [labels](https://github.com/HeliBorg/HeliBoard/labels) [_PR_](https://github.com/HeliBorg/HeliBoard/labels/PR) or [_contributor needed_](https://github.com/HeliBorg/HeliBoard/issues?q=label%3A%22contributor%20needed%22) (even closed ones), contributions are wanted. If you don't find a related issue, it's recommended to open one, but ultimately it's your choice.
 Asking before starting a PR may help you for getting pointers to potentially relevant code, and deciding how to implement your desired changes.
 
-HeliBoard is a complex application and used by users with a large variety of opinions on how things should be.
+YOUBoard is a complex application and used by users with a large variety of opinions on how things should be.
 When contributing to the app, please:
 * Be careful when modifying core components, as it's easy to trigger unintended consequences
 * When introducing a feature or change that might not be wanted by everyone, make it optional
@@ -63,7 +63,7 @@ Further things to consider (though irrelevant for most PRs):
 * Do not add proprietary code or binary blobs. If it turns out to be necessary for a feature you want to add, it might be acceptable when the user opts in and imports those parts, like it's done for glide typing.
 * Privacy: Only relevant when adding some form of communication with other apps. Internet permission will not be added.
 * If your contribution contains code that is not your own, provide a link to the source
-  * This is especially relevant to be sure the code's license is compatible to HeliBoard's GPL3
+  * This is especially relevant to be sure the code's license is compatible to YOUBoard's GPL3
 
 ## Necessary
 
