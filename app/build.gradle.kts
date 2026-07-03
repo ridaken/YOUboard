@@ -8,20 +8,37 @@ plugins {
     kotlin("plugin.compose") version "2.3.20"
 }
 
+// Single source of truth for the app name, used in build artifact names.
+val appName = "YOUBoard"
+
 android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "helium314.keyboard"
+        applicationId = "com.youboard.keyboard"
         minSdk = 21
         targetSdk = 36
-        versionCode = 4003
-        versionName = "4.0-beta1"
+        // CI overrides these via -PversionCodeOverride / -PversionNameOverride; local builds use the defaults.
+        versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt() ?: 4003
+        versionName = (project.findProperty("versionNameOverride") as String?) ?: "4.0-beta1"
         ndk {
             abiFilters.clear()
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
+
+    signingConfigs {
+        create("release") {
+            // Populated only in CI (see .github/workflows/release.yml); local builds stay unsigned.
+            val ksPath = System.getenv("SIGNING_KEYSTORE_PATH")
+            if (ksPath != null) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("SIGNING_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -30,6 +47,10 @@ android {
             isShrinkResources = false
             isDebuggable = false
             isJniDebuggable = false
+            // Only sign when the keystore is provided (CI); otherwise produce an unsigned release APK.
+            if (System.getenv("SIGNING_KEYSTORE_PATH") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         create("nouserlib") { // same as release, but does not allow the user to provide a library
             isMinifyEnabled = true
@@ -67,7 +88,7 @@ android {
             }
             variant.outputs.forEach { output ->
                 if (output is com.android.build.api.variant.impl.VariantOutputImpl) {
-                    output.outputFileName = "HeliBoard_${defaultConfig.versionName}-${variant.buildType}.apk"
+                    output.outputFileName = "${appName}_${defaultConfig.versionName}-${variant.buildType}.apk"
                 }
             }
         }
@@ -118,7 +139,7 @@ android {
         includeInBundle = false
     }
 
-    namespace = "helium314.keyboard.latin"
+    namespace = "com.youboard.keyboard.latin"
     lint {
         abortOnError = true
     }

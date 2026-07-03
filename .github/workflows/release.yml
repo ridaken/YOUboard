@@ -1,0 +1,110 @@
+name: Release
+
+# Runs when a PR is merged into main:
+#   1. runs the unit-test gate
+#   2. builds a signed release APK with an auto-incremented versionCode
+#   3. publishes it as the newest GitHub release, using the PR description as the changelog
+# Direct pushes to main intentionally do not cut a release (the project uses PRs only).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew testRunTestsUnitTest
+
+      - name: Archive reports for failed job
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: '*/build/reports'
+        if: ${{ failure() }}
+
+  release:
+    needs: test
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Compute next version code
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Existing release tags are v<versionCode>; the next release is the highest + 1.
+          nums=$(gh release list --limit 200 --json tagName --jq '.[].tagName' | sed 's/^v//' | grep -E '^[0-9]+$' || true)
+          if [ -z "$nums" ]; then
+            # No releases yet: seed from the default versionCode in build.gradle.kts.
+            base=$(grep -oE '\?: [0-9]+' app/build.gradle.kts | head -1 | grep -oE '[0-9]+')
+            next=$((base + 1))
+          else
+            max=$(echo "$nums" | sort -n | tail -1)
+            next=$((max + 1))
+          fi
+          echo "NEXT=$next" >> "$GITHUB_ENV"
+          echo "Next version code: $next"
+
+      - name: Decode signing keystore
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build signed release APK
+        env:
+          SIGNING_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease -PversionCodeOverride="$NEXT" -PversionNameOverride="v$NEXT"
+
+      - name: Prepare release notes from PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ -z "$PR_BODY" ]; then
+            echo "Release v$NEXT" > notes.md
+          else
+            printf '%s\n' "$PR_BODY" > notes.md
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v$NEXT" app/build/outputs/apk/release/*.apk \
+            --title "YOUBoard v$NEXT" \
+            --notes-file notes.md \
+            --latest \
+            --target "${{ github.event.pull_request.merge_commit_sha }}"

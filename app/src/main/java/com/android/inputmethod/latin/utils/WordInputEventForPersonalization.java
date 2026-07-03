@@ -6,13 +6,13 @@
 
 package com.android.inputmethod.latin.utils;
 
-import helium314.keyboard.latin.utils.Log;
+import com.youboard.keyboard.latin.utils.Log;
 
-import helium314.keyboard.latin.NgramContext;
-import helium314.keyboard.latin.common.StringUtils;
-import helium314.keyboard.latin.define.DecoderSpecificConstants;
-import helium314.keyboard.latin.settings.SpacingAndPunctuations;
-import helium314.keyboard.latin.utils.DictionaryInfoUtils;
+import com.youboard.keyboard.latin.NgramContext;
+import com.youboard.keyboard.latin.common.StringUtils;
+import com.youboard.keyboard.latin.define.DecoderSpecificConstants;
+import com.youboard.keyboard.latin.settings.SpacingAndPunctuations;
+import com.youboard.keyboard.latin.utils.DictionaryInfoUtils;
 
 import java.util.ArrayList;
 import java.util.List;

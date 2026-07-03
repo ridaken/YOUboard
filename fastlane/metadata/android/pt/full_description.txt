@@ -1,4 +1,4 @@
-HeliBoard é um teclado open-source privado, baseado no AOSP / OpenBoard.
+YOUBoard é um teclado open-source privado, baseado no AOSP / OpenBoard.
 Não usa a permissão da internet, assim sendo 100% offline.
 
 Funcionalidades:

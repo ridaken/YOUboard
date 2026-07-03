@@ -1,4 +1,4 @@
-HeliBoard is een privacybewust open-source toetsenbord, gebaseerd op AOSP / OpenBoard.
+YOUBoard is een privacybewust open-source toetsenbord, gebaseerd op AOSP / OpenBoard.
 Het verlangt geen netwerkrechten en is dus 100% offline.
 
 Kenmerken:
