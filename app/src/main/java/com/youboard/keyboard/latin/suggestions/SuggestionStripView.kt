@@ -25,6 +25,7 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityEvent
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.RelativeLayout
 import android.widget.TextView
 import androidx.core.view.doOnNextLayout
@@ -46,6 +47,7 @@ import com.youboard.keyboard.latin.settings.DebugSettings
 import com.youboard.keyboard.latin.settings.Defaults
 import com.youboard.keyboard.latin.settings.Settings
 import com.youboard.keyboard.latin.utils.Log
+import com.youboard.keyboard.latin.utils.NeverPredictList
 import com.youboard.keyboard.latin.utils.ToolbarKey
 import com.youboard.keyboard.latin.utils.ToolbarMode
 import com.youboard.keyboard.latin.utils.addPinnedKey
@@ -394,48 +396,38 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility") // no need for View#performClick, we only return false mostly anyway
     private fun onLongClickSuggestion(wordView: TextView): Boolean {
-        var showIcon = true
-        if (wordView.tag is Int) {
-            val index = wordView.tag as Int
-            val type = suggestedWords.getInfo(index).mSourceDict
-            if (type == Dictionary.DICTIONARY_USER_TYPED || type == Dictionary.DICTIONARY_HARDCODED)
-                showIcon = false
+        val index = wordView.tag as? Int
+        if (index == null || index >= suggestedWords.size())
+            return showMoreSuggestions()
+        val info = suggestedWords.getInfo(index)
+        val word = info.word
+        // User-typed and hardcoded words are not in any dictionary, so they can't be "removed"/forgotten.
+        val canRemove = info.mSourceDict != Dictionary.DICTIONARY_USER_TYPED
+                && info.mSourceDict != Dictionary.DICTIONARY_HARDCODED
+
+        val popup = PopupMenu(context, wordView)
+        popup.menu.add(context.getString(R.string.never_predict_word, word)).setOnMenuItemClickListener {
+            // Demote (don't forget): the word is added to the global never-predict list so it is
+            // no longer auto-corrected/auto-selected, and moved to the end of the current strip.
+            NeverPredictList.addWord(context.prefs(), word)
+            demoteSuggestion(word)
+            true
         }
-        if (showIcon) {
-            val icon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_BIN, context)!!
-            Settings.getValues().mColors.setColor(icon, ColorType.REMOVE_SUGGESTION_ICON)
-            val w = icon.intrinsicWidth
-            val h = icon.intrinsicHeight
-            wordView.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null)
-            wordView.ellipsize = TextUtils.TruncateAt.END
-            val downOk = AtomicBoolean(false)
-            wordView.setOnTouchListener { _, motionEvent ->
-                if (motionEvent.action == MotionEvent.ACTION_UP && downOk.get()) {
-                    val x = motionEvent.x
-                    val y = motionEvent.y
-                    if (0 < x && x < w && 0 < y && y < h) {
-                        removeSuggestion(wordView)
-                        wordView.cancelLongPress()
-                        wordView.isPressed = false
-                        return@setOnTouchListener true
-                    }
-                } else if (motionEvent.action == MotionEvent.ACTION_DOWN) {
-                    val x = motionEvent.x
-                    val y = motionEvent.y
-                    if (0 < x && x < w && 0 < y && y < h) {
-                        downOk.set(true)
-                    }
-                }
-                false
+        if (canRemove) {
+            popup.menu.add(context.getString(R.string.remove_suggestion)).setOnMenuItemClickListener {
+                removeSuggestion(wordView)
+                true
             }
         }
-        if (DebugFlags.DEBUG_ENABLED && (isShowingMoreSuggestionPanel || !showMoreSuggestions())) {
-            showSourceDict(wordView)
-            return true
+        if (DebugFlags.DEBUG_ENABLED) {
+            popup.menu.add("Show source dictionary").setOnMenuItemClickListener {
+                showSourceDict(wordView)
+                true
+            }
         }
-        return showMoreSuggestions()
+        popup.show()
+        return true
     }
 
     private fun showMoreSuggestions(): Boolean {
@@ -489,6 +481,27 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         if (this.suggestedWords.isEmpty && Settings.getValues().mAutoShowToolbar) {
             setToolbarVisibility(true)
         }
+    }
+
+    // Move a "never predict" word to the end of the currently shown strip (keep it tappable),
+    // instead of forgetting it like removeSuggestion does. Demotion for future suggestions is
+    // handled in Suggest via the persisted NeverPredictList.
+    private fun demoteSuggestion(word: String) {
+        moreSuggestionsView.dismissPopupKeysPanel()
+        val kept = ArrayList<SuggestedWordInfo>()
+        val demoted = ArrayList<SuggestedWordInfo>()
+        for (i in 0..<suggestedWords.size()) {
+            val info = suggestedWords.getInfo(i)
+            if (info.word == word) demoted.add(info) else kept.add(info)
+        }
+        if (demoted.isEmpty()) return
+        kept.addAll(demoted)
+        val newSuggestedWords = SuggestedWords(
+            kept, suggestedWords.mRawSuggestions, suggestedWords.typedWordInfo, suggestedWords.mTypedWordValid,
+            false, suggestedWords.mIsObsoleteSuggestions, suggestedWords.mInputStyle, suggestedWords.mSequenceNumber
+        )
+        setSuggestions(newSuggestedWords, direction != 1)
+        suggestionsStrip.isVisible = true
     }
 
     private fun clear() {

@@ -302,6 +302,30 @@ class SuggestTest {
         assertEquals("hem", results.mSuggestedWordInfoList[4].mWord)
     }
 
+    @Test fun `never-predict word is demoted to the end of suggestions but kept`() {
+        latinIME.prefs().edit { putString(Settings.PREF_NEVER_PREDICT_LIST, "hello") }
+        tapTypingSuggestions = suggestionResults(listOf(
+            suggestion("hello", 1000, currentTypingLocale),
+            suggestion("help", 900, currentTypingLocale),
+            suggestion("held", 850, currentTypingLocale),
+        ))
+        val results = getSuggestedWords(false, "hel", CapsMode.OFF)
+        // typed word first (not shown to the user), then non-blocked suggestions, blocked "hello" moved last but still present
+        assertEquals(listOf("hel", "help", "held", "hello"), results.mSuggestedWordInfoList.map { it.mWord })
+    }
+
+    @Test fun `never-predict word is never the autocorrection`() {
+        enableAutocorrect(confidenceVeryAggressive)
+        latinIME.prefs().edit { putString(Settings.PREF_NEVER_PREDICT_LIST, "hello") }
+        tapTypingSuggestions = suggestionResults(listOf(
+            suggestion("hello", 650000, currentTypingLocale), // would normally auto-correct, but it's blocked
+        ))
+        val results = getSuggestedWords(false, "henlo", CapsMode.OFF)
+        assert(!results.mWillAutoCorrect) // must not auto-correct to a never-predict word
+        // typed word kept, and the blocked word stays available so it can still be tapped
+        assertEquals(listOf("henlo", "hello"), results.mSuggestedWordInfoList.map { it.mWord })
+    }
+
     @Test fun `CenterSuggestionTextToEnter has typed text or autocorrect as first suggestion`() {
         tapTypingSuggestions = suggestionResults(listOf(
             suggestion("surge", 1000),

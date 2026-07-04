@@ -490,6 +490,16 @@ language, hence "No language". -->
     <string name="remove">Remove</string>
     <!-- Title of the button to save a custom style entry in the settings dialog. Preferably 10 characters or less. -->
     <string name="save">Save</string>
+    <!-- Long-press menu entry that adds a suggested word to the "never predict" list. %s is the word. -->
+    <string name="never_predict_word">Never predict \"%s\"</string>
+    <!-- Long-press menu entry that removes/forgets a suggested word from the dictionaries. -->
+    <string name="remove_suggestion">Remove suggestion</string>
+    <!-- Title of the settings screen listing words that should never be predicted or auto-corrected. -->
+    <string name="never_predict_list_title">Never predict</string>
+    <!-- Summary explaining the never-predict list. -->
+    <string name="never_predict_list_summary">Words here are never auto-corrected or auto-selected, but stay available if you tap them</string>
+    <!-- Hint shown in the field to add a new never-predict word. -->
+    <string name="never_predict_add_hint">Word to never predict</string>
     <!-- Title of the button to load a custom style entry in the settings dialog. Preferably 10 characters or less. -->
     <string name="load">Load</string>
     <!-- Title of the spinner for choosing a language of custom style in the settings dialog. Preferably 10 characters or less. -->

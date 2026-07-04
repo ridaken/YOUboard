@@ -91,6 +91,7 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
         val typedWordFirstOccurrenceWordInfo = suggestionsContainer.firstOrNull { it.mWord == capitalizedTypedWord }
         val firstOccurrenceOfTypedWordInSuggestions = SuggestedWordInfo.removeDupsAndTypedWord(capitalizedTypedWord, suggestionsContainer)
         makeFirstTwoSuggestionsNonEmoji(suggestionsContainer)
+        demoteNeverPredictWords(suggestionsContainer)
 
         val (allowsToBeAutoCorrected, hasAutoCorrection) = shouldBeAutoCorrected(
             trailingSingleQuotesCount,
@@ -170,6 +171,12 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
     ): Pair<Boolean, Boolean> {
         val consideredWord = typedWordString.dropLast(trailingSingleQuotesCount)
         val firstAndTypedEmptyInfos by lazy { getEmptyWordSuggestions() }
+
+        // Never auto-correct to a "never predict" word. Suggestions are already demoted so a blocked
+        // word normally isn't first, but guard the edge case where every suggestion is blocked.
+        if (firstSuggestionInContainer != null
+            && firstSuggestionInContainer.mWord.lowercase() in Settings.getValues().mNeverPredictWords)
+            return false to false
 
         val scoreLimit = Settings.getValues().mScoreLimitForAutocorrect
         // We allow auto-correction if whitelisting is not required or the word is whitelisted,
@@ -297,6 +304,7 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
         }
         SuggestedWordInfo.removeDupsAndTypedWord(null, suggestionsContainer)
         makeFirstTwoSuggestionsNonEmoji(suggestionsContainer)
+        demoteNeverPredictWords(suggestionsContainer)
         val pseudoTypedWord = suggestionsContainer.firstOrNull() // unchanged first suggestion, but considering adjusted order
         capitalizeAndAddTrailingSingleQuotes(suggestionsContainer, capsMode, 0, locale)
 
@@ -343,6 +351,20 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
         val autocorrectCapitalization = addCapitalizedSuggestion && Settings.getValues().mAutoCorrectCapitalizedSuggestion && isCorrectionEnabled && !wordComposer.isCursorFrontOrMiddleOfComposingWord
         return SuggestedWords(suggestionsList, suggestionResults.mRawSuggestions, pseudoTypedWordInfo, true,
             autocorrectCapitalization, false, inputStyle, sequenceNumber)
+    }
+
+    // Move any word on the global "never predict / correct" list to the end of the suggestion list.
+    // This keeps blocked words tappable in the strip while ensuring they are never the auto-correct
+    // target nor the primary word that auto-commits on space. Matching is case-insensitive.
+    private fun demoteNeverPredictWords(suggestions: ArrayList<SuggestedWordInfo>) {
+        if (suggestions.size < 2) return
+        val neverPredict = Settings.getValues().mNeverPredictWords
+        if (neverPredict.isEmpty()) return
+        val (blocked, allowed) = suggestions.partition { it.mWord.lowercase() in neverPredict }
+        if (blocked.isEmpty()) return
+        suggestions.clear()
+        suggestions.addAll(allowed)
+        suggestions.addAll(blocked)
     }
 
     private fun useDefaultEmojiSkinTone(suggestionsList: ArrayList<SuggestedWordInfo>) {

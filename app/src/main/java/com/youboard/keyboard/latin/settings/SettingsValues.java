@@ -32,6 +32,7 @@ import com.youboard.keyboard.latin.permissions.PermissionsUtil;
 import com.youboard.keyboard.latin.utils.FoldableUtils;
 import com.youboard.keyboard.latin.utils.InputTypeUtils;
 import com.youboard.keyboard.latin.utils.JniUtils;
+import com.youboard.keyboard.latin.utils.NeverPredictList;
 import com.youboard.keyboard.latin.utils.ScriptUtils;
 import com.youboard.keyboard.latin.utils.SubtypeSettings;
 import com.youboard.keyboard.latin.utils.SubtypeUtilsKt;
@@ -39,6 +40,7 @@ import com.youboard.keyboard.latin.utils.ToolbarMode;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * When you call the constructor of this class, you may want to change the current system locale by
@@ -79,6 +81,9 @@ public class SettingsValues {
     public final boolean mUsePersonalizedDicts;
     public final boolean mUseDoubleSpacePeriod;
     public final boolean mBlockPotentiallyOffensive;
+    // Global "never predict / correct" list. Listed words are demoted so they never auto-correct
+    // or auto-commit on space, but remain tappable in the suggestion strip. See NeverPredictList.
+    public final Set<String> mNeverPredictWords;
     public final KeyboardActionListener.SwipeAction mSpaceSwipeHorizontal;
     public final KeyboardActionListener.SwipeAction mSpaceSwipeVertical;
     public final int mLanguageSwipeDistance;
@@ -218,6 +223,7 @@ public class SettingsValues {
         mUseDoubleSpacePeriod = prefs.getBoolean(Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD, Defaults.PREF_KEY_USE_DOUBLE_SPACE_PERIOD)
                 && inputAttributes.mIsGeneralTextInput;
         mBlockPotentiallyOffensive = prefs.getBoolean(Settings.PREF_BLOCK_POTENTIALLY_OFFENSIVE, Defaults.PREF_BLOCK_POTENTIALLY_OFFENSIVE);
+        mNeverPredictWords = NeverPredictList.getWords(prefs);
         mUrlDetectionEnabled = prefs.getBoolean(Settings.PREF_URL_DETECTION, Defaults.PREF_URL_DETECTION);
         mAutoCorrectionEnabledPerUserSettings = prefs.getBoolean(Settings.PREF_AUTO_CORRECTION, Defaults.PREF_AUTO_CORRECTION);
         mAutoCorrectEnabled = mAutoCorrectionEnabledPerUserSettings
