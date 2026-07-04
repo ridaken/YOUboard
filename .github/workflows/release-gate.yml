@@ -1,0 +1,47 @@
+name: Release gate
+
+# Gate checks for the long-standing release/* integration branches.
+# Runs when work is merged into a release/* branch:
+#   - pull_request targeting a release/* branch -> pre-merge gate (e.g. feature -> release/4.0)
+#   - push to a release/* branch                -> post-merge verification
+# The gate runs the same unit-test task as the main pipeline plus a debug build,
+# on JDK 21 (required for SDK 36). Cutting an actual release still only happens on
+# merge to main (see release.yml).
+
+on:
+  pull_request:
+    branches: [ 'release/**' ]
+  push:
+    branches: [ 'release/**' ]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew testRunTestsUnitTest
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Archive reports for failed job
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: '*/build/reports'
+        if: ${{ failure() }}

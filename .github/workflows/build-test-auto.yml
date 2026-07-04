@@ -9,6 +9,8 @@ on:
 #    paths:
 #      - 'app/**'
   pull_request:
+    # release/* PRs are gated by release-gate.yml (tests + build); avoid running twice
+    branches-ignore: [ 'release/**' ]
     paths:
       - 'app/src/main/java**'
   workflow_dispatch:
