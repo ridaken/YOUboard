@@ -94,6 +94,7 @@ public class SettingsValues {
     public final long mClipboardHistoryRetentionTime;
     public final boolean mClipboardHistoryPinnedFirst;
     public final boolean mOneHandedModeEnabled;
+    public final boolean mAdaptiveTouchCorrectionEnabled;
     public final int mOneHandedModeGravity;
     public final float mOneHandedModeScale;
     public final float mKeyGapScale;
@@ -233,6 +234,7 @@ public class SettingsValues {
         mAutoCorrectCapitalizedSuggestion = prefs.getBoolean(Settings.PREF_AUTOCORRECT_CAPITALIZED_SUGGESTION, Defaults.PREF_AUTOCORRECT_CAPITALIZED_SUGGESTION);
         mAutoCorrectShortcuts = prefs.getBoolean(Settings.PREF_AUTOCORRECT_SHORTCUTS, Defaults.PREF_AUTOCORRECT_SHORTCUTS);
         mBackspaceRevertsAutocorrect = prefs.getBoolean(Settings.PREF_BACKSPACE_REVERTS_AUTOCORRECT, Defaults.PREF_BACKSPACE_REVERTS_AUTOCORRECT);
+        mAdaptiveTouchCorrectionEnabled = prefs.getBoolean(Settings.PREF_ADAPTIVE_TOUCH_CORRECTION, Defaults.PREF_ADAPTIVE_TOUCH_CORRECTION);
         mBigramPredictionEnabled = prefs.getBoolean(Settings.PREF_BIGRAM_PREDICTIONS, Defaults.PREF_BIGRAM_PREDICTIONS);
         mSuggestPunctuation = prefs.getBoolean(Settings.PREF_SUGGEST_PUNCTUATION, Defaults.PREF_SUGGEST_PUNCTUATION);
         mSuggestClipboardContent = prefs.getBoolean(Settings.PREF_SUGGEST_CLIPBOARD_CONTENT, Defaults.PREF_SUGGEST_CLIPBOARD_CONTENT);

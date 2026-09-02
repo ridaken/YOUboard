@@ -41,6 +41,8 @@ import kotlin.streams.asSequence
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 @Config(shadows = [
@@ -653,6 +655,46 @@ class InputLogicTest {
         assertEquals("hello", text)
     }
 
+    @Test fun `undo suggestion restores the original autocorrected word`() {
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("hullo")
+        getAutocorrectedWithSpaceAfter("hello", "hullo")
+        assertEquals("hello ", text)
+
+        val suggestions = inputLogic.mSuggestedWords
+        val undoIndex = (0 until suggestions.size()).first {
+            suggestions.getInfo(it).isKindOf(SuggestedWordInfo.KIND_UNDO)
+        }
+        assertEquals("Undo: hullo", suggestions.getLabel(undoIndex))
+        latinIME.pickSuggestionManually(suggestions.getInfo(undoIndex))
+        handleMessages()
+
+        assertEquals("hullo", text)
+    }
+
+    @Test fun `accuracy learning is disabled for password sensitive and incognito fields`() {
+        val policy = InputLogic::class.java.getDeclaredMethod(
+            "canLearnCorrectionFeedback",
+            com.youboard.keyboard.latin.settings.SettingsValues::class.java,
+        ).apply { isAccessible = true }
+
+        setInputType(InputType.TYPE_CLASS_TEXT)
+        assertTrue(policy.invoke(inputLogic, settingsValues) as Boolean)
+
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        assertFalse(policy.invoke(inputLogic, settingsValues) as Boolean)
+
+        currentInputType = InputType.TYPE_CLASS_TEXT
+        currentImeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+        setText(text)
+        assertFalse(policy.invoke(inputLogic, settingsValues) as Boolean)
+
+        currentImeOptions = 0
+        latinIME.prefs().edit { putBoolean(Settings.PREF_ALWAYS_INCOGNITO_MODE, true) }
+        setText(text)
+        assertFalse(policy.invoke(inputLogic, settingsValues) as Boolean)
+    }
+
     @Test fun `remove glide typing word on delete`() {
         glideTypingInput("hello")
         assertEquals("hello", text)
@@ -718,6 +760,7 @@ class InputLogicTest {
         text = ""
         batchEdit = 0
         currentInputType = InputType.TYPE_CLASS_TEXT
+        currentImeOptions = 0
         lastAddedWord = ""
 
         // reset settings
@@ -737,13 +780,14 @@ class InputLogicTest {
         val insert = StringUtils.newSingleCodePointString(codePoint)
         val phantomSpaceToInsert = if (spaceState == SpaceState.PHANTOM) " " else ""
         val oldIsAtEnd = !composer.isCursorFrontOrMiddleOfComposingWord
+        val willAutoCorrect = latinIME.mInputLogic.mSuggestedWords.mWillAutoCorrect
 
         latinIME.onEvent(Event.createEventForCodePointFromUnknownSource(codePoint))
         handleMessages()
 
         if (!latinIME.prefs().getString(Settings.PREF_SELECTED_SUBTYPE, "")!!.contains("CombiningRules") // check fails if combiner merges symbols
             && !(codePoint == Constants.CODE_SPACE && oldBefore.lastOrNull() == ' ') // check fails when 2 spaces are converted into a period
-            && !latinIME.mInputLogic.mSuggestedWords.mWillAutoCorrect // autocorrect obviously creates inconsistencies
+            && !willAutoCorrect // autocorrect obviously creates inconsistencies
             ) {
             if (phantomSpaceToInsert.isEmpty())
                 assertEquals(oldBefore + insert, textBeforeCursor)
@@ -788,6 +832,7 @@ class InputLogicTest {
     private fun setCursorPosition(start: Int, end: Int = start, weirdTextField: Boolean = false) {
         val ei = EditorInfo()
         ei.inputType = currentInputType
+        ei.imeOptions = currentImeOptions
         ei.initialSelStart = start
         ei.initialSelEnd = end
         // imeOptions should not matter
@@ -838,6 +883,7 @@ class InputLogicTest {
         // restarting is false, so this is seen as a new text field
         val ei = EditorInfo()
         ei.inputType = currentInputType
+        ei.imeOptions = currentImeOptions
         latinIME.mHandler.onStartInput(ei, false)
         latinIME.mHandler.onStartInputView(ei, false)
         handleMessages() // this is important so the composing span is set correctly
@@ -919,6 +965,7 @@ class InputLogicTest {
 }
 
 private var currentInputType = InputType.TYPE_CLASS_TEXT
+private var currentImeOptions = 0
 private var currentScript = ScriptUtils.SCRIPT_LATIN
 private val messages = mutableListOf<Message>() // for latinIME / ShadowInputMethodService
 private val delayedMessages = mutableListOf<Message>() // for latinIME / ShadowInputMethodService
@@ -1113,7 +1160,7 @@ class ShadowInputMethodService {
     @Implementation
     fun getCurrentInputEditorInfo() = EditorInfo().apply {
         inputType = currentInputType
-        // anything else?
+        imeOptions = currentImeOptions
     }
     @Implementation
     fun getCurrentInputConnection() = ic

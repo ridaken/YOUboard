@@ -16,6 +16,7 @@ public class KeyDetector {
     private Keyboard mKeyboard;
     private int mCorrectionX;
     private int mCorrectionY;
+    private AdaptiveTouchModel mAdaptiveTouchModel;
 
     public KeyDetector() {
         this(0.0f /* keyHysteresisDistance */, 0.0f /* keyHysteresisDistanceForSlidingModifier */);
@@ -64,6 +65,10 @@ public class KeyDetector {
         return mKeyboard;
     }
 
+    public void setAdaptiveTouchModel(final AdaptiveTouchModel model) {
+        mAdaptiveTouchModel = model;
+    }
+
     public boolean alwaysAllowsKeySelectionByDraggingFinger() {
         return false;
     }
@@ -81,6 +86,16 @@ public class KeyDetector {
         }
         final int touchX = getTouchX(x);
         final int touchY = getTouchY(y);
+        final Key initialKey = detectHitKeyAt(touchX, touchY);
+        if (initialKey == null || mAdaptiveTouchModel == null || !mAdaptiveTouchModel.isEnabled()) {
+            return initialKey;
+        }
+        final int[] adjusted = mAdaptiveTouchModel.adjustTouch(mKeyboard, initialKey, touchX, touchY);
+        final Key adjustedKey = detectHitKeyAt(adjusted[0], adjusted[1]);
+        return adjustedKey == null ? initialKey : adjustedKey;
+    }
+
+    private Key detectHitKeyAt(final int touchX, final int touchY) {
 
         int minDistance = Integer.MAX_VALUE;
         Key primaryKey = null;

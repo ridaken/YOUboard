@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import com.youboard.keyboard.keyboard.KeyboardSwitcher
+import com.youboard.keyboard.keyboard.AdaptiveTouchModel
 import com.youboard.keyboard.latin.R
 import com.youboard.keyboard.latin.permissions.PermissionsUtil
 import com.youboard.keyboard.latin.settings.Defaults
@@ -68,6 +69,8 @@ fun TextCorrectionScreen(
         if (autocorrectEnabled) Settings.PREF_AUTOCORRECT_CAPITALIZED_SUGGESTION else null,
         if (autocorrectEnabled) Settings.PREF_AUTO_CORRECT_CONFIDENCE else null,
         if (autocorrectEnabled) Settings.PREF_BACKSPACE_REVERTS_AUTOCORRECT else null,
+        Settings.PREF_ADAPTIVE_TOUCH_CORRECTION,
+        SettingsWithoutKey.RESET_ADAPTIVE_TOUCH,
         Settings.PREF_AUTO_CAP,
         R.string.settings_category_space,
         Settings.PREF_KEY_USE_DOUBLE_SPACE_PERIOD,
@@ -154,6 +157,18 @@ fun createCorrectionSettings(context: Context) = listOf(
     },
     Setting(context, Settings.PREF_BACKSPACE_REVERTS_AUTOCORRECT, R.string.backspace_reverts_autocorrect) {
         SwitchPreference(it, Defaults.PREF_BACKSPACE_REVERTS_AUTOCORRECT)
+    },
+    Setting(context, Settings.PREF_ADAPTIVE_TOUCH_CORRECTION,
+        R.string.adaptive_touch_correction, R.string.adaptive_touch_correction_summary
+    ) {
+        SwitchPreference(it, Defaults.PREF_ADAPTIVE_TOUCH_CORRECTION)
+    },
+    Setting(context, SettingsWithoutKey.RESET_ADAPTIVE_TOUCH, R.string.reset_adaptive_touch_data) {
+        val localContext = LocalContext.current
+        Preference(
+            name = stringResource(R.string.reset_adaptive_touch_data),
+            onClick = { AdaptiveTouchModel.getInstance(localContext).reset() },
+        )
     },
     Setting(context, Settings.PREF_AUTO_CAP,
         R.string.auto_cap, R.string.auto_cap_summary
