@@ -27,16 +27,19 @@ import androidx.annotation.Nullable;
 import com.youboard.keyboard.event.Event;
 import com.youboard.keyboard.event.InputTransaction;
 import com.youboard.keyboard.keyboard.Keyboard;
+import com.youboard.keyboard.keyboard.AdaptiveTouchModel;
 import com.youboard.keyboard.keyboard.KeyboardLayoutSet;
 import com.youboard.keyboard.keyboard.KeyboardSwitcher;
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import com.youboard.keyboard.latin.CapsMode;
+import com.youboard.keyboard.latin.CorrectionFeedbackStore;
 import com.youboard.keyboard.latin.dictionary.Dictionary;
 import com.youboard.keyboard.latin.DictionaryFacilitator;
 import com.youboard.keyboard.latin.dictionary.DictionaryFactory;
 import com.youboard.keyboard.latin.LastComposedWord;
 import com.youboard.keyboard.latin.LatinIME;
 import com.youboard.keyboard.latin.NgramContext;
+import com.youboard.keyboard.latin.R;
 import com.youboard.keyboard.latin.RichInputConnection;
 import com.youboard.keyboard.latin.SingleDictionaryFacilitator;
 import com.youboard.keyboard.latin.Suggest;
@@ -50,6 +53,9 @@ import com.youboard.keyboard.latin.common.StringUtils;
 import com.youboard.keyboard.latin.common.StringUtilsKt;
 import com.youboard.keyboard.latin.common.SuggestionSpanUtilsKt;
 import com.youboard.keyboard.latin.define.DebugFlags;
+import com.youboard.keyboard.latin.accuracy.AccuracyDiagnosticsRecorder;
+import com.youboard.keyboard.latin.settings.DebugSettings;
+import com.youboard.keyboard.latin.settings.Defaults;
 import com.youboard.keyboard.latin.settings.Settings;
 import com.youboard.keyboard.latin.settings.SettingsValues;
 import com.youboard.keyboard.latin.settings.SpacingAndPunctuations;
@@ -59,6 +65,7 @@ import com.youboard.keyboard.latin.utils.DictionaryInfoUtils;
 import com.youboard.keyboard.latin.utils.GestureDataGatheringKt;
 import com.youboard.keyboard.latin.utils.InputTypeUtils;
 import com.youboard.keyboard.latin.utils.IntentUtils;
+import com.youboard.keyboard.latin.utils.KtxKt;
 import com.youboard.keyboard.latin.utils.Log;
 import com.youboard.keyboard.latin.utils.BackgroundGatheringCache;
 import com.youboard.keyboard.latin.utils.RecapitalizeMode;
@@ -95,11 +102,15 @@ public final class InputLogic {
     public SuggestedWords mSuggestedWords = SuggestedWords.getEmptyInstance();
     public Suggest mSuggest; // non-final for active gesture data gathering, revert when data gathering phase is done (end of 2026 latest)
     public DictionaryFacilitator mDictionaryFacilitator; // non-final for active gesture data gathering, revert when data gathering phase is done (end of 2026 latest)
+    private final CorrectionFeedbackStore mCorrectionFeedbackStore;
+    private final AdaptiveTouchModel mAdaptiveTouchModel;
+    private final AccuracyDiagnosticsRecorder mAccuracyDiagnosticsRecorder;
+    private long mLastSuggestionLatencyNanos;
     private SingleDictionaryFacilitator mEmojiDictionaryFacilitator;
     public void setFacilitator(DictionaryFacilitator facilitator) { // only for active gesture data gathering, remove when data gathering phase is done (end of 2026 latest)
         if (mDictionaryFacilitator == facilitator) return;
         mDictionaryFacilitator = facilitator;
-        mSuggest = new Suggest(mDictionaryFacilitator);
+        mSuggest = new Suggest(mDictionaryFacilitator, mCorrectionFeedbackStore);
     }
 
     public LastComposedWord mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD;
@@ -142,7 +153,10 @@ public final class InputLogic {
         mWordComposer = new WordComposer();
         mConnection = new RichInputConnection(latinIME);
         mInputLogicHandler = new InputLogicHandler(mLatinIME.mHandler, this);
-        mSuggest = new Suggest(dictionaryFacilitator);
+        mCorrectionFeedbackStore = CorrectionFeedbackStore.create(latinIME);
+        mAdaptiveTouchModel = AdaptiveTouchModel.getInstance(latinIME);
+        mAccuracyDiagnosticsRecorder = AccuracyDiagnosticsRecorder.create(latinIME);
+        mSuggest = new Suggest(dictionaryFacilitator, mCorrectionFeedbackStore);
         mDictionaryFacilitator = dictionaryFacilitator;
     }
 
@@ -155,6 +169,16 @@ public final class InputLogic {
      * @param settingsValues the current settings values
      */
     public void startInput(final String combiningSpec, final SettingsValues settingsValues) {
+        mCorrectionFeedbackStore.attach(mLatinIME);
+        mAdaptiveTouchModel.attach(mLatinIME);
+        mAccuracyDiagnosticsRecorder.attach(mLatinIME);
+        mCorrectionFeedbackStore.startSession();
+        mAdaptiveTouchModel.configure(settingsValues.mAdaptiveTouchCorrectionEnabled,
+                settingsValues.mDisplayOrientation, settingsValues.mOneHandedModeEnabled,
+                settingsValues.mOneHandedModeGravity);
+        mAccuracyDiagnosticsRecorder.configure(canLearnCorrectionFeedback(settingsValues)
+                && KtxKt.prefs(mLatinIME).getBoolean(DebugSettings.PREF_ACCURACY_DIAGNOSTICS,
+                        Defaults.PREF_ACCURACY_DIAGNOSTICS));
         mEnteredText = null;
         mWordBeingCorrectedByCursor = null;
         mConnection.onStartInput();
@@ -289,6 +313,29 @@ public final class InputLogic {
 
         SuggestedWords suggestedWords = mSuggestedWords;
         String suggestion = suggestionInfo.mWord;
+        if (suggestionInfo.isKindOf(SuggestedWordInfo.KIND_RESUMED)
+                && mLastComposedWord != LastComposedWord.NOT_A_COMPOSED_WORD
+                && !TextUtils.equals(mLastComposedWord.mTypedWord, mLastComposedWord.mCommittedWord)
+                && TextUtils.equals(suggestion, mLastComposedWord.mTypedWord)) {
+            recordCorrectionRejection(settingsValues, mLastComposedWord.mNgramContext,
+                    mLastComposedWord.mTypedWord, mLastComposedWord.mCommittedWord.toString());
+        }
+        if (!mWordComposer.isBatchMode() && mWordComposer.isComposingWord()) {
+            final String typedWord = mWordComposer.getTypedWord();
+            final SuggestedWordInfo pendingCorrection = mWordComposer.getAutoCorrectionOrNull();
+            if (pendingCorrection != null && !TextUtils.equals(typedWord, pendingCorrection.mWord)) {
+                final NgramContext feedbackContext = mConnection.getNgramContextFromNthPreviousWord(
+                        settingsValues.mSpacingAndPunctuations, 2);
+                if (TextUtils.equals(suggestion, typedWord)) {
+                    recordCorrectionRejection(settingsValues, feedbackContext, typedWord,
+                            pendingCorrection.mWord);
+                } else if (TextUtils.equals(suggestion, pendingCorrection.mWord)
+                        && canLearnCorrectionFeedback(settingsValues)) {
+                    mCorrectionFeedbackStore.recordAcceptance(getDictionaryFacilitatorLocale(),
+                            feedbackContext.getNthPrevWord(1), typedWord, pendingCorrection.mWord);
+                }
+            }
+        }
         // If this is a punctuation picked from the suggestion strip, pass it to onCodeInput
         if (suggestion.length() == 1 && suggestedWords.isPunctuationSuggestions()) {
             // We still want to log a suggestion click.
@@ -309,6 +356,19 @@ public final class InputLogic {
         Event event = Event.createSuggestionPickedEvent(suggestionInfo);
         InputTransaction inputTransaction = new InputTransaction(settingsValues, event,
             SystemClock.uptimeMillis(), mSpaceState, keyboardCapsMode);
+        if (suggestionInfo.isKindOf(SuggestedWordInfo.KIND_UNDO)
+                && mLastComposedWord.canRevertCommit()) {
+            inputTransaction.setDidAffectContents();
+            mConnection.beginBatchEdit();
+            final String originallyTypedWord = mLastComposedWord.mTypedWord;
+            revertCommit(inputTransaction);
+            mConnection.endBatchEdit();
+            StatsUtils.onRevertAutoCorrect();
+            StatsUtils.onWordCommitUserTyped(originallyTypedWord, false);
+            inputTransaction.requireShiftUpdate(InputTransaction.SHIFT_UPDATE_NOW);
+            handler.postUpdateSuggestionStrip(SuggestedWords.INPUT_STYLE_TYPING);
+            return inputTransaction;
+        }
         // Manual pick affects the contents of the editor, so we take note of this. It's important
         // for the sequence of language switching.
         inputTransaction.setDidAffectContents();
@@ -1893,6 +1953,22 @@ public final class InputLogic {
         mLatinIME.mHandler.setSuggestions(suggestedWords);
     }
 
+    private boolean canLearnCorrectionFeedback(final SettingsValues settingsValues) {
+        return !settingsValues.mIncognitoModeEnabled
+                && !settingsValues.mInputAttributes.mIsPasswordField
+                && !settingsValues.mInputAttributes.mNoLearning;
+    }
+
+    private void recordCorrectionRejection(final SettingsValues settingsValues,
+            final NgramContext ngramContext, final String typedWord, final String replacement) {
+        if (!canLearnCorrectionFeedback(settingsValues) || TextUtils.isEmpty(typedWord)
+                || TextUtils.isEmpty(replacement) || TextUtils.equals(typedWord, replacement)) {
+            return;
+        }
+        mCorrectionFeedbackStore.recordRejection(getDictionaryFacilitatorLocale(),
+                ngramContext == null ? null : ngramContext.getNthPrevWord(1), typedWord, replacement);
+    }
+
     /**
      * Reverts a previous commit with auto-correction.
      * <p>
@@ -1906,6 +1982,12 @@ public final class InputLogic {
         final String committedWordString = committedWord.toString();
         final int cancelLength = committedWord.length();
         final String separatorString = mLastComposedWord.mSeparatorString;
+        recordCorrectionRejection(inputTransaction.getSettingsValues(), mLastComposedWord.mNgramContext,
+                mLastComposedWord.mTypedWord, committedWordString);
+        learnTouchOffsets(inputTransaction.getSettingsValues(), mLastComposedWord,
+                mLastComposedWord.mTypedWord);
+        recordAccuracyDiagnostic(inputTransaction.getSettingsValues(), mLastComposedWord,
+                mLastComposedWord.mTypedWord, committedWordString, "REVERTED");
         // If our separator is a space, we won't actually commit it,
         // but set the space state to PHANTOM so that a space will be inserted
         // on the next keypress
@@ -2395,6 +2477,12 @@ public final class InputLogic {
                 StatsUtils.onAutoCorrection(typedWord, stringToCommit, isBatchMode,
                         mDictionaryFacilitator, prevWordsContext);
                 StatsUtils.onWordCommitAutoCorrect(stringToCommit, isBatchMode);
+                final SuggestedWords undoWords = addUndoSuggestionIfAvailable(
+                        SuggestedWords.getEmptyInstance(), SuggestedWords.INPUT_STYLE_NONE);
+                if (!undoWords.isEmpty()) {
+                    mSuggestedWords = undoWords;
+                    mSuggestionStripViewAccessor.setSuggestions(undoWords);
+                }
             } else {
                 StatsUtils.onWordCommitUserTyped(stringToCommit, isBatchMode);
             }
@@ -2418,8 +2506,10 @@ public final class InputLogic {
         }
         // essentially reverted https://github.com/lineageos/android_packages_inputmethods_LatinIME/commit/ee6de1466bc98e27bd414c9a7451f2aee3f9e721
         // can't find any drawback (performance, neither when setting nor when reading)
+        final boolean isAutoCorrection = commitType == LastComposedWord.COMMIT_TYPE_DECIDED_WORD
+                && !TextUtils.equals(mWordComposer.getTypedWord(), chosenWord);
         final CharSequence chosenWordWithSuggestions = getTextWithSuggestionSpan(mLatinIME, chosenWord,
-                mSuggestedWords, getDictionaryFacilitatorLocale());
+                mSuggestedWords, getDictionaryFacilitatorLocale(), isAutoCorrection);
         if (DebugFlags.DEBUG_ENABLED) {
             long runTimeMillis = SystemClock.elapsedRealtime() - startTimeMillis;
             Log.d(TAG, "commitChosenWord() : " + runTimeMillis + " ms to run "
@@ -2458,11 +2548,43 @@ public final class InputLogic {
         // LastComposedWord#didCommitTypedWord by string equality of the remembered
         // strings.
         mLastComposedWord = mWordComposer.commitWord(commitType, chosenWord, separatorString, ngramContext);
+        final boolean trustedLiteralWord = TextUtils.equals(mLastComposedWord.mTypedWord, chosenWord)
+                && mSuggestedWords.mTypedWordValid;
+        if (commitType == LastComposedWord.COMMIT_TYPE_MANUAL_PICK || trustedLiteralWord) {
+            learnTouchOffsets(settingsValues, mLastComposedWord, chosenWord);
+        }
+        recordAccuracyDiagnostic(settingsValues, mLastComposedWord, chosenWord,
+                TextUtils.equals(mLastComposedWord.mTypedWord, chosenWord) ? null : chosenWord,
+                isAutoCorrection ? "AUTO_CORRECTED"
+                        : commitType == LastComposedWord.COMMIT_TYPE_MANUAL_PICK ? "MANUAL_PICK" : "LITERAL");
         if (DebugFlags.DEBUG_ENABLED) {
             long runTimeMillis = SystemClock.elapsedRealtime() - startTimeMillis;
             Log.d(TAG, "commitChosenWord() : " + runTimeMillis + " ms to run "
                     + "WordComposer.commitWord()");
         }
+    }
+
+    private void learnTouchOffsets(final SettingsValues settingsValues,
+            final LastComposedWord composedWord, final String intendedWord) {
+        if (!settingsValues.mAdaptiveTouchCorrectionEnabled
+                || !canLearnCorrectionFeedback(settingsValues)
+                || composedWord == null || TextUtils.isEmpty(intendedWord)) {
+            return;
+        }
+        final Keyboard keyboard = KeyboardSwitcher.getInstance().getKeyboard();
+        if (keyboard == null || !keyboard.mId.getElement().isAlphabet()) return;
+        mAdaptiveTouchModel.learnAligned(keyboard, composedWord.mInputPointers, intendedWord);
+    }
+
+    private void recordAccuracyDiagnostic(final SettingsValues settingsValues,
+            final LastComposedWord composedWord, final String intendedWord,
+            final String candidate, final String outcome) {
+        if (!canLearnCorrectionFeedback(settingsValues)) return;
+        final Keyboard keyboard = KeyboardSwitcher.getInstance().getKeyboard();
+        if (keyboard == null || composedWord == null) return;
+        mAccuracyDiagnosticsRecorder.record(keyboard, composedWord, intendedWord, candidate,
+                mSuggest.getLastCorrectionDecision(), getDictionaryFacilitatorLocale(), outcome,
+                mLastSuggestionLatencyNanos);
     }
 
     /**
@@ -2532,6 +2654,7 @@ public final class InputLogic {
         mWordComposer.adviseCapitalizedModeBeforeFetchingSuggestions(
                 getActualCapsMode(settingsValues, KeyboardSwitcher.getInstance().getKeyboardCapsMode()));
         try {
+            final long suggestionStartNanos = System.nanoTime();
             SuggestedWords suggestedWords = mSuggest.getSuggestedWords(mWordComposer.copy(),
                     getNgramContextFromNthPreviousWordForSuggestion(
                     settingsValues.mSpacingAndPunctuations,
@@ -2543,13 +2666,47 @@ public final class InputLogic {
                     settingsValues.mSettingsValuesForSuggestion,
                     settingsValues.mAutoCorrectEnabled,
                     inputStyle, sequenceNumber);
-            callback.onGetSuggestedWords(suggestedWords);
+            mLastSuggestionLatencyNanos = System.nanoTime() - suggestionStartNanos;
+            callback.onGetSuggestedWords(addUndoSuggestionIfAvailable(suggestedWords, inputStyle));
         } catch (Exception e) {
             // better go without suggestions than have the keyboard crash
             Log.e(TAG, "Error fetching suggested words, using empty words instead", e);
             callback.onGetSuggestedWords(SuggestedWords.getEmptyInstance());
             KeyboardSwitcher.getInstance().showToast("Error getting suggestions", true);
         }
+    }
+
+    private SuggestedWords addUndoSuggestionIfAvailable(final SuggestedWords suggestedWords,
+            final int inputStyle) {
+        for (int index = 0; index < suggestedWords.size(); index++) {
+            if (suggestedWords.getInfo(index).isKindOf(SuggestedWordInfo.KIND_UNDO)) {
+                return suggestedWords;
+            }
+        }
+        if (inputStyle == SuggestedWords.INPUT_STYLE_UPDATE_BATCH
+                || inputStyle == SuggestedWords.INPUT_STYLE_TAIL_BATCH
+                || mWordComposer.isComposingWord()
+                || !mLastComposedWord.canRevertCommit()) {
+            return suggestedWords;
+        }
+        final ArrayList<SuggestedWordInfo> words = new ArrayList<>();
+        final String original = mLastComposedWord.mTypedWord;
+        words.add(new SuggestedWordInfo(original,
+                mLatinIME.getString(R.string.undo_autocorrection, original), "",
+                SuggestedWordInfo.MAX_SCORE, SuggestedWordInfo.KIND_UNDO,
+                Dictionary.DICTIONARY_USER_TYPED, SuggestedWordInfo.NOT_AN_INDEX,
+                SuggestedWordInfo.NOT_A_CONFIDENCE));
+        for (int index = 0; index < suggestedWords.size()
+                && words.size() < SuggestedWords.MAX_SUGGESTIONS; index++) {
+            words.add(suggestedWords.getInfo(index));
+        }
+        return new SuggestedWords(words, suggestedWords.mRawSuggestions, null,
+                false, false, false, SuggestedWords.INPUT_STYLE_PREDICTION,
+                suggestedWords.mSequenceNumber);
+    }
+
+    public SuggestedWords decorateWithUndoSuggestion(final SuggestedWords suggestedWords) {
+        return addUndoSuggestionIfAvailable(suggestedWords, suggestedWords.mInputStyle);
     }
 
     /**

@@ -10,6 +10,7 @@ import android.content.Context
 import android.provider.UserDictionary
 import android.util.LruCache
 import com.youboard.keyboard.keyboard.Keyboard
+import com.youboard.keyboard.keyboard.AdaptiveTouchModel
 import com.youboard.keyboard.keyboard.emoji.SupportedEmojis
 import com.youboard.keyboard.latin.DictionaryFacilitator.DictionaryInitializationListener
 import com.youboard.keyboard.latin.NgramContext.WordInfo
@@ -486,6 +487,7 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         composedData: ComposedData, ngramContext: NgramContext, keyboard: Keyboard,
         settingsValuesForSuggestion: SettingsValuesForSuggestion, sessionId: Int, inputStyle: Int
     ): SuggestionResults {
+        val adjustedComposedData = AdaptiveTouchModel.getCurrent()?.adjustForDecoder(composedData, keyboard) ?: composedData
         val proximityInfoHandle = keyboard.proximityInfo.nativeProximityInfo
         val weightOfLangModelVsSpatialModel = floatArrayOf(Dictionary.NOT_A_WEIGHT_OF_LANG_MODEL_VS_SPATIAL_MODEL)
 
@@ -493,12 +495,12 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         val suggestionsArray = Array<List<SuggestedWordInfo>?>(dictionaryGroups.size) { null }
         for (i in 1..dictionaryGroups.lastIndex) {
             scope.launch {
-                suggestionsArray[i] = getSuggestions(composedData, ngramContext, settingsValuesForSuggestion, sessionId,
+                suggestionsArray[i] = getSuggestions(adjustedComposedData, ngramContext, settingsValuesForSuggestion, sessionId,
                     proximityInfoHandle, weightOfLangModelVsSpatialModel, dictionaryGroups[i])
                 waitForOtherDicts?.countDown()
             }
         }
-        suggestionsArray[0] = getSuggestions(composedData, ngramContext, settingsValuesForSuggestion, sessionId,
+        suggestionsArray[0] = getSuggestions(adjustedComposedData, ngramContext, settingsValuesForSuggestion, sessionId,
             proximityInfoHandle, weightOfLangModelVsSpatialModel, dictionaryGroups[0])
         val suggestionResults = SuggestionResults(
             SuggestedWords.MAX_SUGGESTIONS, ngramContext.isBeginningOfSentenceContext, false
@@ -511,7 +513,7 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
             suggestionResults.mRawSuggestions?.addAll(it)
         }
 
-        includeAtLeastTwoWordSuggestions(suggestionResults, suggestionsArray, composedData.mTypedWord)
+        includeAtLeastTwoWordSuggestions(suggestionResults, suggestionsArray, adjustedComposedData.mTypedWord)
 
         return suggestionResults
     }

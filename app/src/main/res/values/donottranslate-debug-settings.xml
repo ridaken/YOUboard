@@ -11,6 +11,8 @@
     <string name="prefs_debug_settings_enabled" translatable="false">Debug settings enabled. Find them in advanced settings.</string>
     <string name="prefs_debug_mode" translatable="false">Debug Mode</string>
     <string name="prefs_show_suggestion_infos" translatable="false">Show suggestion infos</string>
+    <string name="accuracy_diagnostics" translatable="false">Record accuracy diagnostics</string>
+    <string name="accuracy_diagnostics_summary" translatable="false">Explicitly save a bounded, local replay corpus with typed words and normalized touch offsets</string>
     <string name="prefs_force_non_distinct_multitouch" translatable="false">Force non-distinct multitouch</string>
     <!-- Option to enable sliding key input indicator. The user can see a rubber band-like effect during sliding key input. [CHAR LIMIT=30]-->
     <string name="sliding_key_input_preview" translatable="false">Show slide indicator</string>

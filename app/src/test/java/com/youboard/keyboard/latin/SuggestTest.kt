@@ -78,6 +78,66 @@ class SuggestTest {
         // not corrected because first suggestion score is too low
     }
 
+    @Test fun `Resting on remains literal even when in has strong spatial and context scores`() {
+        enableAutocorrect(confidenceVeryAggressive)
+        tapTypingSuggestions = suggestionResults(listOf(
+            suggestion("in", 2_000_000),
+            suggestion("on", 1_800_000),
+        ))
+        nextWordSuggestions = suggestionResults(listOf(
+            suggestion("in", 260),
+            suggestion("on", 100),
+        ))
+
+        val results = getSuggestedWords(false, "on", CapsMode.OFF)
+
+        assert(!results.mWillAutoCorrect)
+        assertEquals(CorrectionDecision.Reason.SHORT_VALID_WORD, suggest.lastCorrectionDecision?.reason)
+        assert(results.mSuggestedWordInfoList.any { it.mWord == "in" })
+    }
+
+    @Test fun `genuine invalid-word error teh still autocorrects to the`() {
+        enableAutocorrect(confidenceVeryAggressive)
+        tapTypingSuggestions = suggestionResults(listOf(suggestion("the", 2_000_000)))
+
+        val results = getSuggestedWords(false, "teh", CapsMode.OFF)
+
+        assert(results.mWillAutoCorrect)
+        assertEquals(CorrectionDecision.Reason.AUTO_CORRECT, suggest.lastCorrectionDecision?.reason)
+    }
+
+    @Test fun `a rejected correction does not recur in the same editor session`() {
+        enableAutocorrect(confidenceVeryAggressive)
+        tapTypingSuggestions = suggestionResults(listOf(suggestion("the", 2_000_000)))
+        val feedbackField = latinIME.mInputLogic.javaClass
+            .getDeclaredField("mCorrectionFeedbackStore").apply { isAccessible = true }
+        val feedback = feedbackField.get(latinIME.mInputLogic) as CorrectionFeedbackStore
+        feedback.recordRejection(Locale.ENGLISH, null, "teh", "the")
+
+        val results = getSuggestedWords(false, "teh", CapsMode.OFF)
+
+        assert(!results.mWillAutoCorrect)
+        assertEquals(CorrectionDecision.Reason.REJECTED_BY_USER, suggest.lastCorrectionDecision?.reason)
+    }
+
+    @Test fun `valid longer word requires a meaningful spatial margin`() {
+        enableAutocorrect(confidenceVeryAggressive)
+        tapTypingSuggestions = suggestionResults(listOf(
+            suggestion("from", 1_550_000),
+            suggestion("form", 1_500_000),
+            suggestion("farm", 1_540_000),
+        ))
+        nextWordSuggestions = suggestionResults(listOf(
+            suggestion("from", 260),
+            suggestion("form", 100),
+        ))
+
+        val results = getSuggestedWords(false, "form", CapsMode.OFF)
+
+        assert(!results.mWillAutoCorrect)
+        assertEquals(CorrectionDecision.Reason.TYPED_WORD_SCORE_WINS, suggest.lastCorrectionDecision?.reason)
+    }
+
     @Test fun `'ill' to 'I'll' if 'ill' not used before in this context, and I'll is whitelisted`() {
         val locale = Locale.ENGLISH
         val result = shouldBeAutoCorrected(
@@ -184,7 +244,7 @@ class SuggestTest {
         // not corrected because score is lower
     }
 
-    @Test fun `'né' instead of 'ne' if 'né' in ngram context`() {
+    @Test fun `valid short 'ne' remains literal even if 'né' is in ngram context`() {
         val locale = Locale.FRENCH
         val result = shouldBeAutoCorrected(
             "ne",
@@ -194,10 +254,10 @@ class SuggestTest {
             locale,
             confidenceModest
         )
-        assert(result.last()) // should be corrected
+        assert(!result.last())
     }
 
-    @Test fun `'né' instead of 'ne' if 'né' has clearly better score in ngram context`() {
+    @Test fun `valid short 'ne' remains literal even with a stronger ngram score`() {
         val locale = Locale.FRENCH
         val result = shouldBeAutoCorrected(
             "ne",
@@ -207,7 +267,7 @@ class SuggestTest {
             locale,
             confidenceModest
         )
-        assert(result.last()) // should be corrected
+        assert(!result.last())
     }
 
     @Test fun `no 'né' instead of 'ne' if both with same score in ngram context`() {

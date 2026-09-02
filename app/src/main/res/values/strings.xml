@@ -152,6 +152,10 @@
     <string name="auto_correct_capitalized_suggestions_description">After pressing shift to capitalize suggestions, auto-correct will trigger</string>
     <!-- Option to undo auto correction with backspace -->
     <string name="backspace_reverts_autocorrect">Backspace reverts autocorrect</string>
+    <string name="undo_autocorrection">Undo: %1$s</string>
+    <string name="adaptive_touch_correction">Adaptive touch correction</string>
+    <string name="adaptive_touch_correction_summary">Learn local touch offsets to make nearby-key taps more accurate</string>
+    <string name="reset_adaptive_touch_data">Reset learned touch data</string>
     <!-- Option to disable auto correction. -->
     <string name="auto_correction_threshold_mode_off">Off</string> <!-- todo: use it or remove it -->
     <!-- Option to suggest auto correction suggestions modestly. Auto-corrects only to a word which has small edit distance from typed word. -->
