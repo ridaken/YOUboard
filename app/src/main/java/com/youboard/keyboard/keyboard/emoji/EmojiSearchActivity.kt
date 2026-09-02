@@ -82,6 +82,7 @@ import com.youboard.keyboard.keyboard.KeyboardTheme
 import com.youboard.keyboard.keyboard.KeyboardTypeface
 import com.youboard.keyboard.keyboard.internal.KeyboardBuilder
 import com.youboard.keyboard.keyboard.internal.KeyboardParams
+import com.youboard.keyboard.keyboard.internal.ShiftMode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.EMOJI_HINT_LABEL
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getCode
@@ -323,7 +324,7 @@ class EmojiSearchActivity : ComponentActivity() {
                     if (it.mHasShortcuts) it.mShortcutTargets[0]?.mWord else null
                 } else null
         })
-        KeyboardSwitcher.getInstance().setAlphabetKeyboard()
+        KeyboardSwitcher.getInstance().setAlphabetKeyboard(ShiftMode.UNSHIFT)
         Log.d(TAG, "init end")
     }
 

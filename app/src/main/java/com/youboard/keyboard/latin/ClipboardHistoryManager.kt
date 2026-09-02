@@ -21,6 +21,7 @@ import com.youboard.keyboard.keyboard.KeyboardTypeface
 import com.youboard.keyboard.compat.ClipboardManagerCompat
 import com.youboard.keyboard.event.Event
 import com.youboard.keyboard.event.HapticEvent
+import com.youboard.keyboard.keyboard.internal.KeyboardIconsSet
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import com.youboard.keyboard.latin.common.ColorType
 import com.youboard.keyboard.latin.common.Constants
@@ -84,6 +85,16 @@ class ClipboardHistoryManager(
         } else if (maySaveFromUri(clipItem.uri, latinIME)) {
             clipboardDao?.addClipUri(timeStamp, false, clipItem.uri, description, latinIME)
         }
+    }
+
+    fun getPrimaryClipIfText(): String? {
+        if (tempPrimaryClip) return null // avoid updating history
+        val clipData = clipboardManager.primaryClip ?: return null
+        if (clipData.itemCount == 0) return null
+        val clipItem = clipData.getItemAt(0) ?: return null
+        return if (clipData.description?.hasMimeType("text/*") == true)
+            clipItem.coerceToText(latinIME).toString().takeIf { it.isNotEmpty() }
+        else null
     }
 
     // fallback method because in some apps there is no supported mime type and commitContend does nothing,
@@ -189,8 +200,9 @@ class ClipboardHistoryManager(
         // create the view
         val binding = ClipboardSuggestionBinding.inflate(LayoutInflater.from(latinIME), parent, false)
         val textView = binding.clipboardSuggestionText
-        val clipIcon = latinIME.mKeyboardSwitcher.keyboard.mIconsSet.getIconDrawable(ToolbarKey.PASTE.name.lowercase())
-        textView.setCompoundDrawablesRelativeWithIntrinsicBounds(clipIcon, null, null, null)
+        val clipIcon = KeyboardIconsSet.instance.getIconDrawable(ToolbarKey.PASTE.name.lowercase())
+        clipIcon?.setBounds(0, 0, textView.lineHeight, textView.lineHeight) // scale the icon to the text
+        textView.setCompoundDrawablesRelative(clipIcon, null, null, null)
         val inputType = editorInfo?.inputType ?: InputType.TYPE_NULL
         if (hasText) {
             if (TextUtils.isEmpty(content)) return null
@@ -222,12 +234,14 @@ class ClipboardHistoryManager(
         }
 
         val closeButton = binding.clipboardSuggestionClose
-        closeButton.setImageDrawable(latinIME.mKeyboardSwitcher.keyboard.mIconsSet.getIconDrawable(ToolbarKey.CLOSE_HISTORY.name.lowercase()))
+        closeButton.setImageDrawable(KeyboardIconsSet.instance.getIconDrawable(ToolbarKey.CLOSE_HISTORY.name.lowercase()))
+        closeButton.layoutParams.width = textView.lineHeight // scale the icon to the text
+        closeButton.layoutParams.height = textView.lineHeight
         closeButton.setOnClickListener { removeClipboardSuggestion() }
 
         val colors = latinIME.mSettings.current.mColors
         textView.setTextColor(colors.get(ColorType.KEY_TEXT))
-        clipIcon?.let { colors.setColor(it, ColorType.KEY_ICON) }
+        clipIcon?.let { colors.setColor(it, ColorType.CLIPBOARD_SUGGESTION_ICON) }
         colors.setColor(closeButton, ColorType.REMOVE_SUGGESTION_ICON)
         colors.setBackground(binding.root, ColorType.CLIPBOARD_SUGGESTION_BACKGROUND)
 
