@@ -25,6 +25,7 @@ import com.youboard.keyboard.settings.screens.DictionaryScreen
 import com.youboard.keyboard.settings.screens.GestureTypingScreen
 import com.youboard.keyboard.settings.screens.LanguageScreen
 import com.youboard.keyboard.settings.screens.MainSettingsScreen
+import com.youboard.keyboard.settings.screens.NeverPredictScreen
 import com.youboard.keyboard.settings.screens.PersonalDictionariesScreen
 import com.youboard.keyboard.settings.screens.PersonalDictionaryScreen
 import com.youboard.keyboard.settings.screens.PreferencesScreen
@@ -121,6 +122,9 @@ fun SettingsNavHost(
         composable(SettingsDestination.PersonalDictionaries) {
             PersonalDictionariesScreen(onClickBack = ::goBack)
         }
+        composable(SettingsDestination.NeverPredict) {
+            NeverPredictScreen(onClickBack = ::goBack)
+        }
         composable(SettingsDestination.Languages) {
             LanguageScreen(onClickBack = ::goBack)
         }
@@ -160,6 +164,7 @@ object SettingsDestination {
     const val ColorsNight = "colors_night/"
     const val PersonalDictionaries = "personal_dictionaries"
     const val PersonalDictionary = "personal_dictionary/"
+    const val NeverPredict = "never_predict"
     const val Languages = "languages"
     const val Subtype = "subtype/"
     const val Layouts = "layouts"
