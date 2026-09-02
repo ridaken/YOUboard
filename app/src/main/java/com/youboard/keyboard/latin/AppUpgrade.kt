@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package com.youboard.keyboard.latin
 
 import android.annotation.SuppressLint
@@ -7,11 +8,13 @@ import com.youboard.keyboard.compat.isDeviceLocked
 import com.youboard.keyboard.compat.isUserLocked
 import com.youboard.keyboard.keyboard.ColorSetting
 import com.youboard.keyboard.keyboard.KeyboardTheme
+import com.youboard.keyboard.keyboard.emoji.RecentEmojis
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode.checkAndConvertCode
 import com.youboard.keyboard.latin.common.ColorType
 import com.youboard.keyboard.latin.common.Constants.Separators
 import com.youboard.keyboard.latin.common.Constants.Subtype.ExtraValue
 import com.youboard.keyboard.latin.common.LocaleUtils.constructLocale
+import com.youboard.keyboard.latin.common.StringUtils
 import com.youboard.keyboard.latin.common.encodeBase36
 import com.youboard.keyboard.latin.database.ClipboardDao
 import com.youboard.keyboard.latin.settings.Defaults
@@ -22,6 +25,7 @@ import com.youboard.keyboard.latin.settings.createPrefKeyForBooleanSettings
 import com.youboard.keyboard.latin.utils.DeviceProtectedUtils
 import com.youboard.keyboard.latin.utils.DictionaryInfoUtils
 import com.youboard.keyboard.latin.utils.DictionaryInfoUtils.USER_DICTIONARY_SUFFIX
+import com.youboard.keyboard.latin.utils.JsonUtils
 import com.youboard.keyboard.latin.utils.LayoutType
 import com.youboard.keyboard.latin.utils.LayoutType.Companion.folder
 import com.youboard.keyboard.latin.utils.LayoutUtilsCustom
@@ -694,6 +698,14 @@ private object AppUpgrade {
                     putFloat(createPrefKeyForBooleanSettings(Settings.PREF_KEY_GAP_SCALE_PREFIX, 3, 2), 1.1f)
                 }
                 remove("narrow_key_gaps")
+            }
+        }
+        if (oldVersion <= 4005) {
+            if (prefs.contains("emoji_recent_keys")) {
+                val old = JsonUtils.jsonStrToList(prefs.getString("emoji_recent_keys", ""))
+                    .mapNotNull { it as? String ?: (it as? Int)?.let { StringUtils.newSingleCodePointString(it) } }
+                RecentEmojis.set(old)
+                prefs.edit { remove("emoji_recent_keys")  }
             }
         }
         upgradeToolbarPrefs(prefs)

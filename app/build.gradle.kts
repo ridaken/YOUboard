@@ -19,8 +19,8 @@ android {
         minSdk = 21
         targetSdk = 36
         // CI overrides these via -PversionCodeOverride / -PversionNameOverride; local builds use the defaults.
-        versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt() ?: 4003
-        versionName = (project.findProperty("versionNameOverride") as String?) ?: "4.0-beta1"
+        versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt() ?: 4101
+        versionName = (project.findProperty("versionNameOverride") as String?) ?: "4.1"
         ndk {
             abiFilters.clear()
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))

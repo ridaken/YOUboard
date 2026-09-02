@@ -25,10 +25,12 @@ import com.youboard.keyboard.latin.common.moveStepsToCharCount
 import com.youboard.keyboard.latin.define.ProductionFlags
 import com.youboard.keyboard.latin.inputlogic.InputLogic
 import com.youboard.keyboard.latin.settings.Settings
-import com.youboard.keyboard.latin.utils.GestureDataGatheringSettings
 import com.youboard.keyboard.latin.utils.BackgroundGatheringCache
+import com.youboard.keyboard.latin.utils.GestureDataGatheringSettings
+import com.youboard.keyboard.latin.utils.RecapitalizeMode
 import com.youboard.keyboard.latin.utils.SubtypeSettings
 import com.youboard.keyboard.latin.utils.prefs
+import com.youboard.keyboard.keyboard.internal.LayoutDirective
 import kotlin.math.abs
 
 class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inputLogic: InputLogic) : KeyboardActionListener {
@@ -48,9 +50,9 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     private var initialSubtype: InputMethodSubtype? = null
     private var subtypeSwitchCount = 0
 
-    override fun onPressKey(primaryCode: Int, repeatCount: Int, isSinglePointer: Boolean, hapticEvent: HapticEvent) {
+    override fun onPressKey(primaryCode: Int, repeatCount: Int, pointerCount: Int, hapticEvent: HapticEvent) {
         metaOnPressKey(primaryCode)
-        keyboardSwitcher.onPressKey(primaryCode, isSinglePointer, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
+        keyboardSwitcher.onPressKey(primaryCode, pointerCount, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
         // we need to use LatinIME for handling of key-down audio and haptics
         latinIME.hapticAndAudioFeedback(primaryCode, repeatCount, hapticEvent)
     }
@@ -195,14 +197,28 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     override fun onHorizontalSpaceSwipe(steps: Int): Boolean = when (Settings.getValues().mSpaceSwipeHorizontal) {
         KeyboardActionListener.SwipeAction.MOVE_CURSOR -> onMoveCursorHorizontally(steps)
         KeyboardActionListener.SwipeAction.SWITCH_LANGUAGE -> onLanguageSlide(steps)
-        KeyboardActionListener.SwipeAction.TOGGLE_NUMPAD -> toggleNumpad(false, false)
+        KeyboardActionListener.SwipeAction.TOGGLE_NUMPAD -> {
+            toggleLayout(LayoutDirective.Utility.NUMPAD, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
+            true
+        }
+        KeyboardActionListener.SwipeAction.TOGGLE_DPAD -> {
+            toggleLayout(LayoutDirective.Utility.DPAD, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
+            true
+        }
         else -> false
     }
 
     override fun onVerticalSpaceSwipe(steps: Int): Boolean = when (Settings.getValues().mSpaceSwipeVertical) {
         KeyboardActionListener.SwipeAction.MOVE_CURSOR -> onMoveCursorVertically(steps)
         KeyboardActionListener.SwipeAction.SWITCH_LANGUAGE -> onLanguageSlide(steps)
-        KeyboardActionListener.SwipeAction.TOGGLE_NUMPAD -> toggleNumpad(false, false)
+        KeyboardActionListener.SwipeAction.TOGGLE_NUMPAD -> {
+            toggleLayout(LayoutDirective.Utility.NUMPAD, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
+            true
+        }
+        KeyboardActionListener.SwipeAction.TOGGLE_DPAD -> {
+            toggleLayout(LayoutDirective.Utility.DPAD, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState)
+            true
+        }
         KeyboardActionListener.SwipeAction.HIDE_KEYBOARD -> {
             latinIME.requestHideSelf(0)
             true
@@ -223,14 +239,17 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         else -> false
     }
 
-    override fun onEndSpaceSwipe(){
+    override fun onEndSpaceSwipe() {
         initialSubtype = null
         subtypeSwitchCount = 0
     }
 
-    override fun toggleNumpad(withSliding: Boolean, forceReturnToAlpha: Boolean): Boolean {
-        keyboardSwitcher.toggleNumpad(withSliding, latinIME.currentAutoCapsState, latinIME.currentRecapitalizeState, forceReturnToAlpha)
-        return true
+    override fun toggleLayout(layout: LayoutDirective.Utility, autoCapsFlags: Int, recapitalizeMode: RecapitalizeMode?) {
+        keyboardSwitcher.toggleLayout(layout, autoCapsFlags, recapitalizeMode)
+    }
+
+    override fun onLongPressAlphaSymbolForNumpad() {
+        keyboardSwitcher.onLongPressAlphaSymbolForNumpad()
     }
 
     override fun onMoveDeletePointer(steps: Int) {
@@ -339,6 +358,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
             }
             gestureMoveForwardHaptics(text.isNotEmpty())
         }
+        inputLogic.setExpectCursorMove()
 
         // the shortcut below causes issues due to horrible handling of text fields by Firefox and forks
         // issues:
