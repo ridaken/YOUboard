@@ -19,7 +19,6 @@ import com.youboard.keyboard.latin.RichInputMethodSubtype
 import com.youboard.keyboard.latin.RichInputMethodSubtype.Companion.emojiSubtype
 import com.youboard.keyboard.latin.RichInputMethodSubtype.Companion.noLanguageSubtype
 import com.youboard.keyboard.latin.settings.Settings
-import com.youboard.keyboard.latin.utils.DictionaryInfoUtils.getLocalesWithEmojiDicts
 import com.youboard.keyboard.latin.utils.InputTypeUtils
 import com.youboard.keyboard.latin.utils.Log
 import com.youboard.keyboard.latin.utils.ResourceUtils
@@ -216,7 +215,7 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
             fun buildEmojiClipBottomRow(context: Context, ei: EditorInfo?): KeyboardLayoutSet {
                 val builder = Builder(context, ei)
                 builder.params.mode = KeyboardMode.TEXT
-                builder.params.emojiSearchAvailable = getLocalesWithEmojiDicts(context).isNotEmpty()
+                builder.params.emojiSearchAvailable = true
                 val width = ResourceUtils.getKeyboardWidth(context, Settings.getValues())
                 // actually the keyboard does not have full height, but at this point we use it to get correct key heights
                 val height = ResourceUtils.getKeyboardHeight(context.resources, Settings.getValues())

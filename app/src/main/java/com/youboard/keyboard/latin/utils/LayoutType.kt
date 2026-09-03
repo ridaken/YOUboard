@@ -3,7 +3,6 @@ package com.youboard.keyboard.latin.utils
 import com.youboard.keyboard.latin.R
 import com.youboard.keyboard.latin.common.Constants.Separators
 import com.youboard.keyboard.latin.common.Constants.Subtype.ExtraValue
-import java.io.File
 import java.util.EnumMap
 
 enum class LayoutType {
@@ -22,7 +21,8 @@ enum class LayoutType {
             return map
         }
 
-        val LayoutType.folder get() = "layouts${File.separator}${name.lowercase()}"
+        // AssetManager paths always use '/', including in Windows-hosted tests.
+        val LayoutType.folder get() = "layouts/${name.lowercase()}"
 
         val LayoutType.displayNameId get() = when (this) {
             MAIN -> R.string.subtype_no_language
