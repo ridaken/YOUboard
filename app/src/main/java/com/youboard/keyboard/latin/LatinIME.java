@@ -12,6 +12,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
@@ -21,6 +22,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Debug;
 import android.os.Message;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.util.PrintWriterPrinter;
 import android.util.Printer;
@@ -66,6 +69,9 @@ import com.youboard.keyboard.latin.inputlogic.InputLogic;
 import com.youboard.keyboard.latin.personalization.PersonalizationHelper;
 import com.youboard.keyboard.latin.settings.Settings;
 import com.youboard.keyboard.latin.settings.SettingsValues;
+import com.youboard.keyboard.latin.settings.SplitKeyboardSettings;
+import com.youboard.keyboard.latin.utils.ResourceUtils;
+import com.youboard.keyboard.latin.utils.ToolbarUtilsKt;
 import com.youboard.keyboard.latin.suggestions.SuggestionStripView;
 import com.youboard.keyboard.latin.suggestions.SuggestionStripViewAccessor;
 import com.youboard.keyboard.latin.touchinputconsumer.GestureConsumer;
@@ -161,6 +167,52 @@ public class LatinIME extends InputMethodService implements
             new DictionaryDumpBroadcastReceiver(this);
 
     FoldableUtils.FoldableObserver foldableObserver;
+    private final Handler mKeyboardEnvironmentHandler = new Handler(Looper.getMainLooper());
+    private FoldableUtils.Snapshot mLastKeyboardEnvironment;
+    private final Runnable mRefreshKeyboardEnvironment = this::refreshKeyboardEnvironment;
+    private final SharedPreferences.OnSharedPreferenceChangeListener mSplitPreferenceListener = (prefs, key) -> {
+        if (SplitKeyboardSettings.affectsGeometry(key)) requestKeyboardEnvironmentUpdate();
+    };
+
+    private void requestKeyboardEnvironmentUpdate() {
+        mKeyboardEnvironmentHandler.removeCallbacks(mRefreshKeyboardEnvironment);
+        mKeyboardEnvironmentHandler.post(mRefreshKeyboardEnvironment);
+    }
+
+    private void refreshKeyboardEnvironment() {
+        if (foldableObserver == null) return;
+        foldableObserver.refresh();
+        // Hidden views are rebuilt by onStartInputView; do not disturb their editor connection.
+        if (!isInputViewShown() || getCurrentInputEditorInfo() == null) return;
+        final MainKeyboardView view = mKeyboardSwitcher.getMainKeyboardView();
+        if (view == null || view.getKeyboard() == null) return;
+        final KeyboardId oldId = view.getKeyboard().mId;
+        loadSettings();
+        final SettingsValues values = mSettings.getCurrent();
+        final FoldableUtils.Snapshot environment = FoldableUtils.INSTANCE.getSnapshot();
+        boolean geometryChanged = !environment.equals(mLastKeyboardEnvironment)
+                || oldId.isSplitLayout() != values.mIsSplitKeyboardEnabled
+                || oldId.getSplitSpacerRelativeWidth() != values.mSplitKeyboardSpacerRelativeWidth
+                || oldId.getWidth() != ResourceUtils.getKeyboardWidth(this, values)
+                || oldId.getHeight() != ResourceUtils.getKeyboardHeight(getResources(), values);
+        mLastKeyboardEnvironment = environment;
+        if (geometryChanged) {
+            view.cancelAllOngoingEvents();
+            mInputLogic.onKeyboardGeometryChanged();
+            // Other posture-specific dimensions (padding, key gaps) may change at the same width.
+            KeyboardLayoutSet.Companion.onKeyboardThemeChanged();
+            mKeyboardSwitcher.saveKeyboardState();
+            mKeyboardSwitcher.reloadKeyboard();
+            mGestureConsumer = GestureConsumer.newInstance(getCurrentInputEditorInfo(),
+                    mInputLogic.getPrivateCommandPerformer(), mRichImm.getCurrentSubtypeLocale(),
+                    mKeyboardSwitcher.getKeyboard());
+        }
+        if (mSuggestionStripView != null) ToolbarUtilsKt.refreshToolbarButtons(mSuggestionStripView);
+    }
+
+    public void onKeyboardGeometryChanged() {
+        mInputLogic.onKeyboardGeometryChanged();
+    }
 
     final static class RestartAfterDeviceUnlockReceiver extends BroadcastReceiver {
         @Override
@@ -404,6 +456,11 @@ public class LatinIME extends InputMethodService implements
             obtainMessage(MSG_UPDATE_TAIL_BATCH_INPUT_COMPLETED, suggestedWords).sendToTarget();
         }
 
+        public void cancelPendingGestureResults() {
+            removeMessages(MSG_UPDATE_TAIL_BATCH_INPUT_COMPLETED);
+            removeMessages(MSG_SHOW_GESTURE_PREVIEW_AND_SET_SUGGESTIONS);
+        }
+
         public void postSwitchLanguage(final InputMethodSubtype subtype) {
             obtainMessage(MSG_SWITCH_LANGUAGE_AUTOMATICALLY, subtype).sendToTarget();
         }
@@ -548,11 +605,11 @@ public class LatinIME extends InputMethodService implements
         KeyboardSwitcher.init(this);
         super.onCreate();
 
+        foldableObserver = new FoldableUtils.FoldableObserver(this, this::requestKeyboardEnvironmentUpdate);
         loadSettings();
         mClipboardHistoryManager.onCreate();
         mHandler.onCreate();
-        if (FoldableUtils.INSTANCE.isFoldable())
-            foldableObserver = new FoldableUtils.FoldableObserver(this);
+        KtxKt.prefs(this).registerOnSharedPreferenceChangeListener(mSplitPreferenceListener);
 
         // Register to receive ringer mode change.
         final IntentFilter filter = new IntentFilter();
@@ -692,6 +749,8 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onDestroy() {
+        mKeyboardEnvironmentHandler.removeCallbacksAndMessages(null);
+        KtxKt.prefs(this).unregisterOnSharedPreferenceChangeListener(mSplitPreferenceListener);
         mClipboardHistoryManager.onDestroy();
         mDictionaryFacilitator.closeDictionaries();
         mSettings.onDestroy();
@@ -739,6 +798,9 @@ public class LatinIME extends InputMethodService implements
         // KeyboardSwitcher will check by itself if theme update is necessary
         mKeyboardSwitcher.updateKeyboardTheme(KtxKt.getDisplayContext(this));
         super.onConfigurationChanged(conf);
+        mDisplayContext = KtxKt.getDisplayContext(this);
+        if (foldableObserver != null) foldableObserver.refresh();
+        requestKeyboardEnvironmentUpdate();
     }
 
     @Override
@@ -751,7 +813,11 @@ public class LatinIME extends InputMethodService implements
     @Override
     public View onCreateInputView() {
         StatsUtils.onCreateInputView();
-        return mKeyboardSwitcher.onCreateInputView(KtxKt.getDisplayContext(this), mIsHardwareAcceleratedDrawingEnabled);
+        final View view = mKeyboardSwitcher.onCreateInputView(KtxKt.getDisplayContext(this), mIsHardwareAcceleratedDrawingEnabled);
+        view.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left != oldRight - oldLeft) requestKeyboardEnvironmentUpdate();
+        });
+        return view;
     }
 
     @Override
@@ -851,6 +917,7 @@ public class LatinIME extends InputMethodService implements
 
     void onStartInputViewInternal(final EditorInfo editorInfo, final boolean restarting) {
         super.onStartInputView(editorInfo, restarting);
+        if (foldableObserver != null) foldableObserver.refresh();
 
         setGestureDataGatheringMode(editorInfo, restarting);
 
@@ -868,11 +935,13 @@ public class LatinIME extends InputMethodService implements
         boolean isDifferentTextField = !restarting || inputTypeChanged;
 
         // we want to reload the settings before calling updateKeyboardTheme, because updateKeyboardTheme reads SettingsValues.mToolbarMode
-        if (isDifferentTextField || !currentSettingsValues.hasSameOrientation(getResources().getConfiguration())) {
+        if (isDifferentTextField || !currentSettingsValues.hasSameOrientation(getResources().getConfiguration())
+                || !FoldableUtils.INSTANCE.getSnapshot().equals(mLastKeyboardEnvironment)) {
             loadSettings();
             if (hasSuggestionStripView())
                 mSuggestionStripView.updateVoiceKey();
         }
+        mLastKeyboardEnvironment = FoldableUtils.INSTANCE.getSnapshot();
 
         switcher.updateKeyboardTheme(mDisplayContext);
         MainKeyboardView mainKeyboardView = switcher.getMainKeyboardView();

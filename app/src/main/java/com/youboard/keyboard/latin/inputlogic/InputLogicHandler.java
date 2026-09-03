@@ -54,6 +54,7 @@ class InputLogicHandler implements Handler.Callback {
     // Called on the UI thread by InputLogic.
     public void onStartBatchInput() {
         synchronized (mLock) {
+            ++mBatchGeneration;
             mInBatchInput = true;
         }
     }
@@ -82,9 +83,15 @@ class InputLogicHandler implements Handler.Callback {
                 return;
             }
             mInputLogic.mWordComposer.setBatchInputPointers(batchPointers);
+            final int generation = mBatchGeneration;
             getSuggestedWords(() -> mInputLogic.getSuggestedWords(
                 isTailBatchInput ? SuggestedWords.INPUT_STYLE_TAIL_BATCH : SuggestedWords.INPUT_STYLE_UPDATE_BATCH, sequenceNumber,
-                suggestedWords -> showGestureSuggestionsWithPreviewVisuals(suggestedWords, isTailBatchInput))
+                suggestedWords -> {
+                    synchronized (mLock) {
+                        if (generation != mBatchGeneration) return;
+                        showGestureSuggestionsWithPreviewVisuals(suggestedWords, isTailBatchInput);
+                    }
+                })
             );
         }
     }
@@ -136,9 +143,14 @@ class InputLogicHandler implements Handler.Callback {
     // Called on the UI thread by InputLogic.
     public void onCancelBatchInput() {
         synchronized (mLock) {
+            ++mBatchGeneration;
             mInBatchInput = false;
+            mLatinIMEHandler.cancelPendingGestureResults();
         }
     }
+
+    // Guard callbacks that finish after a fold/layout change has canceled their gesture.
+    private int mBatchGeneration;
 
     /**
      * Trigger an update for a tail batch input.

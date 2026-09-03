@@ -18,10 +18,8 @@ import com.youboard.keyboard.latin.AudioAndHapticFeedbackManager
 import com.youboard.keyboard.latin.common.Constants.Separators
 import com.youboard.keyboard.latin.settings.Defaults
 import com.youboard.keyboard.latin.settings.Settings
+import com.youboard.keyboard.latin.settings.SplitKeyboardSettings
 import com.youboard.keyboard.latin.utils.ToolbarKey.*
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.EnumMap
 import java.util.Locale
 
@@ -41,12 +39,18 @@ fun setToolbarButtonsActivatedStateOnPrefChange(buttonsGroup: ViewGroup, key: St
         && key != Settings.PREF_ALWAYS_INCOGNITO_MODE
         && key != GestureDataGatheringSettings.PREF_BACKGROUND_GATHERING_ENABLED
         && key != GestureDataGatheringSettings.PREF_BACKGROUND_DISABLED_BEFORE_TIME_MILLIS
+        && !SplitKeyboardSettings.affectsGeometry(key)
         && key?.startsWith(Settings.PREF_ONE_HANDED_MODE_PREFIX) == false)
         return
 
-    GlobalScope.launch {
-        delay(10) // need to wait until SettingsValues are reloaded
-        buttonsGroup.forEach { if (it is ImageButton) setToolbarButtonActivatedState(it) }
+    // Run after preference listeners finish reloading SettingsValues, on the view's UI thread.
+    buttonsGroup.post { refreshToolbarButtons(buttonsGroup) }
+}
+
+fun refreshToolbarButtons(group: ViewGroup) {
+    group.forEach {
+        if (it is ImageButton && it.tag is ToolbarKey) setToolbarButtonActivatedState(it)
+        else if (it is ViewGroup) refreshToolbarButtons(it)
     }
 }
 

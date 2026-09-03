@@ -117,7 +117,8 @@ class AdaptiveTouchModel internal constructor(private var backingFile: File?) {
         val partition = partitionId(keyboard)
         for (index in 0 until source.pointerSize) {
             val key = findKey(keyboard, codePoints[index])
-            val point = if (key == null) {
+            val point = if (key == null || source.xCoordinates[index] == Constants.NOT_A_COORDINATE
+                || source.yCoordinates[index] == Constants.NOT_A_COORDINATE) {
                 intArrayOf(source.xCoordinates[index], source.yCoordinates[index])
             } else {
                 adjustTouch(partition, keyboard, key, source.xCoordinates[index], source.yCoordinates[index])

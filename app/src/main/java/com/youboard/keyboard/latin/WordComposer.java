@@ -18,6 +18,7 @@ import com.youboard.keyboard.latin.common.InputPointers;
 import com.youboard.keyboard.latin.common.StringUtils;
 import com.youboard.keyboard.latin.define.DebugFlags;
 import com.youboard.keyboard.latin.define.DecoderSpecificConstants;
+import com.youboard.keyboard.latin.common.Constants;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -157,6 +158,21 @@ public final class WordComposer {
 
     public InputPointers getInputPointers() {
         return mInputPointers;
+    }
+
+    public void invalidateTouchCoordinates() {
+        if (mIsBatchMode) {
+            // The completed word remains editable, but its old glide path is no longer usable.
+            mIsBatchMode = false;
+            mInputPointers.reset();
+            for (int i = 0; i < size(); i++) {
+                mInputPointers.addPointer(Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, 0, 0);
+            }
+        }
+        for (int i = 0; i < mInputPointers.getPointerSize(); i++) {
+            mInputPointers.getXCoordinates()[i] = Constants.NOT_A_COORDINATE;
+            mInputPointers.getYCoordinates()[i] = Constants.NOT_A_COORDINATE;
+        }
     }
 
     /**

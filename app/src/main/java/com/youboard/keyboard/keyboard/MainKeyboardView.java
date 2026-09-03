@@ -613,6 +613,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
 
     public void cancelAllOngoingEvents() {
         mTimerHandler.cancelAllMessages();
+        PointerTracker.cancelGestureForLayoutChange();
         PointerTracker.setReleasedKeyGraphicsToAllKeys();
         mGestureFloatingTextDrawingPreview.dismissGestureFloatingPreviewText();
         mSlidingKeyInputDrawingPreview.dismissSlidingKeyInputPreview();

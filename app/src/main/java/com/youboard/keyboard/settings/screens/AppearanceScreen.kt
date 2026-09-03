@@ -3,13 +3,11 @@ package com.youboard.keyboard.settings.screens
 
 import android.content.Context
 import android.os.Build
-import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -43,8 +41,9 @@ import com.youboard.keyboard.settings.preferences.TextInputPreference
 import com.youboard.keyboard.latin.utils.previewDark
 import androidx.core.content.edit
 import com.youboard.keyboard.latin.settings.Settings
+import com.youboard.keyboard.latin.settings.SplitKeyboardSettings
+import com.youboard.keyboard.settings.preferences.SplitKeyboardPreference
 import com.youboard.keyboard.latin.utils.FoldableUtils
-import com.youboard.keyboard.settings.dialogs.ThreeButtonAlertDialog
 
 @Composable
 fun AppearanceScreen(
@@ -52,6 +51,7 @@ fun AppearanceScreen(
 ) {
     val ctx = LocalContext.current
     val prefs = ctx.prefs()
+    val foldable = FoldableUtils.snapshots.collectAsState().value.isFoldable
     val b = (LocalContext.current.getActivity() as? SettingsActivity)?.prefChanged?.collectAsState()
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
@@ -71,12 +71,7 @@ fun AppearanceScreen(
         SettingsWithoutKey.BACKGROUND_IMAGE_LANDSCAPE,
         R.string.settings_category_miscellaneous,
         Settings.PREF_ENABLE_SPLIT_KEYBOARD,
-        if (prefs.getBoolean(Settings.PREF_ENABLE_SPLIT_KEYBOARD_LANDSCAPE, Defaults.PREF_ENABLE_SPLIT_KEYBOARD)
-            || prefs.getBoolean(Settings.PREF_ENABLE_SPLIT_KEYBOARD, Defaults.PREF_ENABLE_SPLIT_KEYBOARD)
-            || prefs.getBoolean(Settings.PREF_ENABLE_SPLIT_KEYBOARD_FOLDED, Defaults.PREF_ENABLE_SPLIT_KEYBOARD)
-            || prefs.getBoolean(Settings.PREF_ENABLE_SPLIT_KEYBOARD_FOLDED_LANDSCAPE, Defaults.PREF_ENABLE_SPLIT_KEYBOARD)
-            )
-            Settings.PREF_SPLIT_SPACER_SCALE_PREFIX else null,
+        if (SplitKeyboardSettings.hasEnabledProfile(prefs, foldable)) Settings.PREF_SPLIT_SPACER_SCALE_PREFIX else null,
         if (prefs.getBoolean(Settings.PREF_THEME_KEY_BORDERS, Defaults.PREF_THEME_KEY_BORDERS))
             Settings.PREF_KEY_GAP_SCALE_PREFIX else null,
         Settings.PREF_KEYBOARD_HEIGHT_SCALE_PREFIX,
@@ -208,36 +203,7 @@ fun createAppearanceSettings(context: Context) = listOf(
         BackgroundImagePref(it, true)
     },
     Setting(context, Settings.PREF_ENABLE_SPLIT_KEYBOARD, R.string.enable_split_keyboard) {
-        var show by remember { mutableStateOf(false) }
-        val prefAndName = listOfNotNull(
-            Settings.PREF_ENABLE_SPLIT_KEYBOARD to stringResource(R.string.button_default),
-            Settings.PREF_ENABLE_SPLIT_KEYBOARD_LANDSCAPE to stringResource(R.string.landscape),
-            if (!FoldableUtils.isFoldable) null else
-                Settings.PREF_ENABLE_SPLIT_KEYBOARD_FOLDED to stringResource(R.string.folded),
-            if (!FoldableUtils.isFoldable) null else
-                Settings.PREF_ENABLE_SPLIT_KEYBOARD_FOLDED_LANDSCAPE to stringResource(R.string.folded) + " / " + stringResource(R.string.landscape)
-        )
-        Preference(
-            name = stringResource(R.string.enable_split_keyboard),
-            onClick = { show = true },
-            description = prefAndName.filter { LocalContext.current.prefs().getBoolean(it.first, Defaults.PREF_ENABLE_SPLIT_KEYBOARD) }
-                .joinToString(", ") { it.second }.takeIf { it.isNotEmpty() }
-        )
-        if (show) {
-            ThreeButtonAlertDialog(
-                onDismissRequest = { show = false },
-                onConfirmed = {},
-                confirmButtonText = null,
-                cancelButtonText = stringResource(R.string.dialog_close),
-                content = {
-                    Column {
-                        prefAndName.forEach {
-                            SwitchPreference(name = it.second, key = it.first, default = Defaults.PREF_ENABLE_SPLIT_KEYBOARD)
-                        }
-                    }
-                }
-            )
-        }
+        SplitKeyboardPreference()
     },
     Setting(context, Settings.PREF_SPLIT_SPACER_SCALE_PREFIX, R.string.split_spacer_scale) { setting ->
         KeyboardScalePreference(

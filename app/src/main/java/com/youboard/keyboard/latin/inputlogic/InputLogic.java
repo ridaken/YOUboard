@@ -702,6 +702,13 @@ public final class InputLogic {
                 SuggestedWords.getEmptyInstance(), true /* dismissGestureFloatingPreviewText */);
     }
 
+    /** Keep composing text, but do not decode or learn coordinates from the previous layout. */
+    public void onKeyboardGeometryChanged() {
+        mInputLogicHandler.onCancelBatchInput();
+        ++mAutoCommitSequenceNumber;
+        mWordComposer.invalidateTouchCoordinates();
+    }
+
     // TODO: on the long term, this method should become private, but it will be difficult.
     // Especially, how do we deal with InputMethodService.onDisplayCompletions?
     public void setSuggestedWords(final SuggestedWords suggestedWords) {

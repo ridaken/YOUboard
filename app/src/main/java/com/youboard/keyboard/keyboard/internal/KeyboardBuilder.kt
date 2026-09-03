@@ -126,23 +126,27 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
     }
 
     private fun addSplit() {
-        val spacerRelativeWidth = Settings.getValues().mSplitKeyboardSpacerRelativeWidth
+        val spacerRelativeWidth = mParams.mId.splitSpacerRelativeWidth
+        if (spacerRelativeWidth <= 0f) return
         // adjust gaps for the whole keyboard, so it's the same for all rows
         mParams.mRelativeHorizontalGap *= 1f / (1f + spacerRelativeWidth)
         mParams.mHorizontalGap = (mParams.mRelativeHorizontalGap * mParams.mId.width).toInt()
         var maxWidthBeforeSpacer = 0f
         var maxWidthAfterSpacer = 0f
         for (row in keysInRows) {
+            if (row.isEmpty()) continue
             val y = row.first().yPos // all have the same y, so this is fine
             val relativeWidthSum = row.sumOf { it.mWidth } // sum up relative widths
             val spacer = KeyParams.newSpacer(mParams, spacerRelativeWidth)
             // insert spacer before first key that starts right of the center (also consider gap)
             var insertIndex = row.indexOfFirst { it.xPos + it.mAbsoluteWidth / 3 > mParams.mOccupiedWidth / 2 }
                 .takeIf { it > -1 } ?: (row.size / 2) // fallback should never be needed, but better than having an error
+            val normalKeyWidth = row.firstOrNull { !it.isSpacer && it.mCode != Constants.CODE_SPACE }?.mWidth
+                ?: mParams.mDefaultKeyWidth
             val indexOfProperSpace = row.indexOfFirst { key ->
                 // should work reasonably with customizable layouts, where space key might be completely different:
                 // "normal" width space keys are ignored, and the possibility of space being first in row is considered
-                key.mCode == Constants.CODE_SPACE && key.mWidth > row.first { !it.isSpacer && it.mCode != Constants.CODE_SPACE }.mWidth * 1.5f
+                key.mCode == Constants.CODE_SPACE && key.mWidth > normalKeyWidth * 1.5f
             }
             if (indexOfProperSpace >= 0) {
                 val spaceLeft = row[indexOfProperSpace]
@@ -163,7 +167,8 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
                     row.add(insertIndex, spacer)
                 } else {
                     // otherwise increase space width, so other keys are resized properly
-                    spaceLeft.mWidth += spacerWidth
+                    // Narrow custom spaces must never acquire a negative width.
+                    spaceLeft.mWidth = (spaceLeft.mWidth + spacerWidth).coerceAtLeast(mParams.mDefaultKeyWidth)
                 }
             } else {
                 val widthBeforeSpacer = row.subList(0, insertIndex).sumOf { it.mWidth }

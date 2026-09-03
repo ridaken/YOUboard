@@ -59,6 +59,15 @@ public final class ResourceUtils {
         return windowBounds.width() - insets.left - insets.right;
     }
 
+    /** Available IME window width for automatic layout eligibility, without changing legacy sizing. */
+    public static int getAvailableKeyboardWidth(final Context ctx) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return getDefaultKeyboardWidth(ctx);
+        WindowMetrics metrics = ctx.getSystemService(WindowManager.class).getCurrentWindowMetrics();
+        Insets insets = metrics.getWindowInsets().getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+        return Math.min(getDefaultKeyboardWidth(ctx), metrics.getBounds().width() - insets.left - insets.right);
+    }
+
     public static int getSecondaryKeyboardHeight(final Resources res, final SettingsValues settingsValues) {
         final int keyboardHeight = getKeyboardHeight(res, settingsValues);
         if (settingsValues.mToolbarMode == ToolbarMode.HIDDEN && ! settingsValues.mToolbarHidingGlobal) {

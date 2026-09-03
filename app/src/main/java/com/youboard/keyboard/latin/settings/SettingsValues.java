@@ -240,13 +240,16 @@ public class SettingsValues {
         mDoubleSpacePeriodTimeout = 1100; // ms
         mHasHardwareKeyboard = Settings.readHasHardwareKeyboard(res.getConfiguration());
         boolean isLandscape = mDisplayOrientation == Configuration.ORIENTATION_LANDSCAPE;
-        float displayWidthDp = TypedValueCompat.pxToDp(res.getDisplayMetrics().widthPixels, res.getDisplayMetrics());
         boolean isFolded = FoldableUtils.INSTANCE.isFolded();
-        mIsSplitKeyboardEnabled = Settings.readSplitKeyboardEnabled(prefs, isLandscape, isFolded);
-        // determine spacerWidth from display width and scale setting
-        mSplitKeyboardSpacerRelativeWidth = mIsSplitKeyboardEnabled
-                ? Math.min(Math.max((displayWidthDp - 600) / 600f + 0.15f, 0.15f), 0.35f) * Settings.readSplitSpacerScale(prefs, isLandscape, isFolded)
-                : 0f;
+        mIsFloatingKeyboard = !mIsLocked && SettingsKt.isFloatingKeyboardEnabled(context);
+        boolean automaticSplit = !isFolded && FoldableUtils.INSTANCE.isFoldable()
+                && SplitKeyboardSettings.mode(prefs, SplitKeyboardSettings.key(isLandscape, false))
+                == SplitKeyboardSettings.Mode.AUTOMATIC;
+        boolean automaticOneHanded = automaticSplit && (
+                Settings.readOneHandedModeEnabled(prefs, isLandscape, false, false)
+                || Settings.readOneHandedModeEnabled(prefs, isLandscape, true, false));
+        mIsSplitKeyboardEnabled = Settings.readSplitKeyboardEnabled(prefs, isLandscape, isFolded,
+                mIsFloatingKeyboard, automaticOneHanded);
         mQuickPinToolbarKeys = mToolbarMode == ToolbarMode.EXPANDABLE && prefs.getBoolean(Settings.PREF_QUICK_PIN_TOOLBAR_KEYS, Defaults.PREF_QUICK_PIN_TOOLBAR_KEYS);
 
         // Compute other readable settings
@@ -287,12 +290,12 @@ public class SettingsValues {
         mClipboardHistoryRetentionTime = prefs.getInt(Settings.PREF_CLIPBOARD_HISTORY_RETENTION_TIME, Defaults.PREF_CLIPBOARD_HISTORY_RETENTION_TIME);
         mClipboardHistoryPinnedFirst = prefs.getBoolean(Settings.PREF_CLIPBOARD_HISTORY_PINNED_FIRST, Defaults.PREF_CLIPBOARD_HISTORY_PINNED_FIRST);
 
-        mIsFloatingKeyboard = !mIsLocked && SettingsKt.isFloatingKeyboardEnabled(context);
         mFloatingWidth = SettingsKt.readFloatingWidth(context);
         mFloatingHeight = mIsFloatingKeyboard && mHasHardwareKeyboard && prefs.getBoolean(Settings.PREF_SHOW_ONLY_TOOLBAR_WITH_HARDWARE_KEYBOARD, Defaults.PREF_SHOW_ONLY_TOOLBAR_WITH_HARDWARE_KEYBOARD)
                           ? 0 : SettingsKt.readFloatingHeight(context);
         mKeyboardHeightScale = mIsFloatingKeyboard ? 1f : Settings.readHeightScale(prefs, isLandscape, isFolded);
-        mOneHandedModeEnabled = !mIsFloatingKeyboard && Settings.readOneHandedModeEnabled(prefs, isLandscape, mIsSplitKeyboardEnabled, isFolded);
+        mOneHandedModeEnabled = !mIsFloatingKeyboard && (automaticOneHanded
+                || Settings.readOneHandedModeEnabled(prefs, isLandscape, mIsSplitKeyboardEnabled, isFolded));
         mOneHandedModeGravity = Settings.readOneHandedModeGravity(prefs, isLandscape, mIsSplitKeyboardEnabled, isFolded);
         if (mOneHandedModeEnabled) {
             final float baseScale = res.getFraction(R.fraction.config_one_handed_mode_width, 1, 1);
@@ -300,6 +303,15 @@ public class SettingsValues {
             mOneHandedModeScale = 1 - (1 - baseScale) * extraScale;
         } else
             mOneHandedModeScale = 1f;
+        // Preserve existing folded profiles, including manually split floating/one-handed layouts.
+        float keyboardWidthDp = TypedValueCompat.pxToDp(
+                isFolded ? res.getDisplayMetrics().widthPixels
+                        : com.youboard.keyboard.latin.utils.ResourceUtils.getKeyboardWidth(context, this),
+                res.getDisplayMetrics());
+        mSplitKeyboardSpacerRelativeWidth = mIsSplitKeyboardEnabled
+                ? Math.min(Math.max((keyboardWidthDp - 600) / 600f + 0.15f, 0.15f), 0.35f)
+                    * Settings.readSplitSpacerScale(prefs, isLandscape, isFolded)
+                : 0f;
         mSecondaryLocales = SubtypeUtilsKt.getSecondaryLocales(selectedSubtype.getExtraValue());
         mShowMorePopupKeys = SubtypeUtilsKt.getMoreKeys(selectedSubtype, prefs,
             selectedSubtype.isAsciiCapable() ? Defaults.PREF_MORE_POPUP_KEYS : LocaleKeyboardInfos.POPUP_KEYS_NORMAL);
