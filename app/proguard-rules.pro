@@ -12,3 +12,8 @@
 # after upgrading to gradle 8, stack traces contain "unknown source"
 -keepattributes SourceFile,LineNumberTable
 -dontobfuscate
+
+# WindowManager probes these optional interfaces supplied by device firmware.
+# They are not packaged with the app, including in the unoptimized debug build.
+-dontwarn androidx.window.extensions.**
+-dontwarn androidx.window.sidecar.**

@@ -983,6 +983,8 @@ New dictionary:
     <string name="folded">Folded</string>
     <!-- Emoji search title bar text -->
     <string name="emoji_search_title">Search emoji</string>
+    <string name="emoji_search_no_results">No matching emoji</string>
+    <string name="emoji_search_clear">Clear search</string>
     <!-- Placeholder text for search field -->
     <string name="search_field_placeholder">Search</string>
     <!-- Button to show later -->

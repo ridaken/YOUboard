@@ -20,6 +20,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -200,6 +201,7 @@ public final class EmojiPalettesView extends LinearLayout
     private KeyboardActionListener mKeyboardActionListener = KeyboardActionListener.EMPTY_LISTENER;
     private final EmojiCategory mEmojiCategory;
     private ViewPager2 mPager;
+    private View mSearchButton;
 
     public EmojiPalettesView(final Context context, final AttributeSet attrs) {
         this(context, attrs, R.attr.emojiPalettesViewStyle);
@@ -260,6 +262,18 @@ public final class EmojiPalettesView extends LinearLayout
         }
 
         mPager = findViewById(R.id.emoji_pager);
+        mSearchButton = findViewById(R.id.emoji_search_button);
+        mSearchButton.setOnClickListener(v -> {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(
+                    KeyCode.EMOJI_SEARCH, this, HapticEvent.KEY_PRESS);
+            mKeyboardActionListener.onCodeInput(KeyCode.EMOJI_SEARCH, NOT_A_COORDINATE,
+                    NOT_A_COORDINATE, false);
+        });
+        ImageView searchIcon = findViewById(R.id.emoji_search_icon);
+        TextView searchLabel = findViewById(R.id.emoji_search_label);
+        mColors.setColor(searchIcon, ColorType.EMOJI_SEARCH_TEXT);
+        searchLabel.setTextColor(mColors.get(ColorType.EMOJI_SEARCH_TEXT));
+        mColors.setBackground(mSearchButton, ColorType.EMOJI_SEARCH_BACKGROUND);
         mPager.setAdapter(new PagerAdapter(mPager));
         mEmojiLayoutParams.setEmojiListProperties(mPager);
         mEmojiCategoryPageIndicatorView = findViewById(R.id.emoji_category_page_id_view);
@@ -350,7 +364,11 @@ public final class EmojiPalettesView extends LinearLayout
     }
 
     void addRecentKey(final Key key) {
-        if (Settings.getValues().mIncognitoModeEnabled) {
+        addRecentKey(key, Settings.getValues().mIncognitoModeEnabled);
+    }
+
+    void addRecentKey(final Key key, final boolean incognito) {
+        if (incognito) {
             // We do not want to log recent keys while being in incognito
             return;
         }

@@ -10,6 +10,8 @@ import android.os.Build;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
 
+import com.youboard.keyboard.keyboard.emoji.EmojiSearchActivity;
+
 import com.youboard.keyboard.latin.common.StringUtilsKt;
 import com.youboard.keyboard.compat.AppWorkarounds;
 import com.youboard.keyboard.latin.utils.Log;
@@ -131,10 +133,9 @@ public final class InputAttributes {
                 && InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD != variation;
 
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            mNoLearning = (editorInfo.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0;
-        else
-            mNoLearning = false;
+        mNoLearning = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && (editorInfo.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0)
+                || EmojiSearchActivity.Companion.decodePrivateImeOptions(editorInfo).height() > 0;
     }
 
     public boolean isTypeNull() {

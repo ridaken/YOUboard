@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.youboard.keyboard.keyboard.emoji
 
-import android.R.string.cancel
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
-import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
@@ -50,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -74,6 +74,8 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.youboard.keyboard.keyboard.Key
 import com.youboard.keyboard.keyboard.KeyboardElement
 import com.youboard.keyboard.keyboard.KeyboardLayoutSet
@@ -83,13 +85,10 @@ import com.youboard.keyboard.keyboard.KeyboardTypeface
 import com.youboard.keyboard.keyboard.internal.KeyboardBuilder
 import com.youboard.keyboard.keyboard.internal.KeyboardParams
 import com.youboard.keyboard.keyboard.internal.ShiftMode
-import com.youboard.keyboard.keyboard.internal.keyboard_parser.EMOJI_HINT_LABEL
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
-import com.youboard.keyboard.keyboard.internal.keyboard_parser.getCode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiDefaultVersion
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiKeyDimensions
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiNeutralVersion
-import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiPopupSpec
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.loadEmojiDefaultVersionsAndPopupSpecs
 import com.youboard.keyboard.latin.LatinIME
 import com.youboard.keyboard.latin.R
@@ -107,6 +106,12 @@ import com.youboard.keyboard.latin.utils.Log
 import com.youboard.keyboard.latin.utils.ResourceUtils
 import com.youboard.keyboard.latin.utils.SearchIcon
 import com.youboard.keyboard.latin.utils.prefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.properties.Delegates
 
 private const val TAG = "emoji-search"
@@ -120,14 +125,18 @@ class EmojiSearchActivity : ComponentActivity() {
     private var firstSearchDone = false
     private var screenHeight by Delegates.notNull<Int>()
     private lateinit var hintLocales: LocaleList
-    private lateinit var emojiPageKeyboardView: EmojiPageKeyboardView
+    private lateinit var emojiResultsView: RecyclerView
+    private lateinit var emojiSearchAdapter: EmojiSearchAdapter
     private lateinit var keyboardParams: KeyboardParams
     private var keyWidth by Delegates.notNull<Float>()
     private var keyHeight by Delegates.notNull<Float>()
-    private var firstKey: Key? = null
     private var pressedKey: Key? = null
     private var imeVisible = false
     private var imeClosed = false
+    private var resultCount by mutableIntStateOf(-1)
+    private var layoutVersion by mutableIntStateOf(0)
+    private val searchScope = MainScope()
+    private var searchJob: Job? = null
 
     private val closer = Runnable {
         if (!imeVisible) {
@@ -140,6 +149,7 @@ class EmojiSearchActivity : ComponentActivity() {
     @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) searchText = ""
         init()
         enableEdgeToEdge()
         setContent {
@@ -185,8 +195,19 @@ class EmojiSearchActivity : ComponentActivity() {
                                 color = Color(colors.get(ColorType.EMOJI_KEY_TEXT)),
                                 modifier = Modifier.fillMaxWidth().align(Alignment.CenterVertically))
                         }
-                        key(emojiPageKeyboardView) {
-                            AndroidView({ emojiPageKeyboardView }, modifier = Modifier.wrapContentHeight().fillMaxWidth())
+                        key(layoutVersion) {
+                            val visibleRows = if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 1 else 2
+                            val resultHeight = with(LocalDensity.current) { (keyHeight * visibleRows + 20).toDp() }
+                            Box(modifier = Modifier.fillMaxWidth().height(resultHeight).clipToBounds()) {
+                                AndroidView({ emojiResultsView }, modifier = Modifier.fillMaxSize())
+                                if (resultCount == 0) {
+                                    Text(
+                                        text = stringResource(R.string.emoji_search_no_results),
+                                        color = Color(colors.get(ColorType.EMOJI_SEARCH_TEXT)),
+                                        modifier = Modifier.align(Alignment.Center),
+                                    )
+                                }
+                            }
                         }
                         val focusRequester = remember { FocusRequester() }
                         var text by remember { mutableStateOf(TextFieldValue(searchText, selection = TextRange(searchText.length))) }
@@ -214,10 +235,7 @@ class EmojiSearchActivity : ComponentActivity() {
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done,
                                     hintLocales = hintLocales,
                                     platformImeOptions = PlatformImeOptions(encodePrivateImeOptions(PrivateImeOptions(heightPx)))),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    if (Settings.getValues().mAutoCorrectEnabled) pressedKey = firstKey
-                                    finish()
-                                }),
+                                keyboardActions = KeyboardActions(onDone = { cancel() }),
                                 singleLine = true,
                                 cursorBrush = SolidColor(textFieldColors.cursorColor)
                             ) {
@@ -238,7 +256,7 @@ class EmojiSearchActivity : ComponentActivity() {
                                         IconButton(onClick = {
                                             text = TextFieldValue()
                                             search("")
-                                        }) { CloseIcon(cancel) }
+                                        }) { CloseIcon(R.string.emoji_search_clear) }
                                     },
                                     singleLine = true,
                                     enabled = true,
@@ -269,6 +287,10 @@ class EmojiSearchActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        if (isChangingConfigurations) {
+            super.onStop()
+            return
+        }
         val intent = Intent(this, LatinIME::class.java).setAction(EMOJI_SEARCH_DONE_ACTION)
             .putExtra(IME_CLOSED_KEY, imeClosed)
         pressedKey?.let {
@@ -277,10 +299,18 @@ class EmojiSearchActivity : ComponentActivity() {
             else
                 Character.toString(it.code))
 
-            KeyboardSwitcher.getInstance().emojiPalettesView.addRecentKey(it)
+            KeyboardSwitcher.getInstance().emojiPalettesView.addRecentKey(
+                it, this.intent.getBooleanExtra(SOURCE_INCOGNITO, false))
         }
         startService(intent)
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        Handler(mainLooper).removeCallbacks(closer)
+        searchJob?.cancel()
+        searchScope.cancel()
+        super.onDestroy()
     }
 
     private fun init() {
@@ -288,7 +318,9 @@ class EmojiSearchActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         screenHeight = windowManager.defaultDisplay.height
         Log.d(TAG, "screenHeight: $screenHeight")
-        hintLocales = LocaleList(DictionaryInfoUtils.getLocalesWithEmojiDicts(this).map { Locale(it.toLanguageTag()) })
+        hintLocales = LocaleList(
+            (DictionaryInfoUtils.getLocalesWithEmojiDicts(this).map { Locale(it.toLanguageTag()) } + Locale("en")).distinct()
+        )
         val keyboardWidth = ResourceUtils.getKeyboardWidth(this, Settings.getValues())
         val layoutSet = KeyboardLayoutSet.Builder(this, null).setSubtype(RichInputMethodSubtype.emojiSubtype)
             .setKeyboardGeometry(keyboardWidth, EmojiLayoutParams(resources).emojiKeyboardHeight).build()
@@ -301,16 +333,8 @@ class EmojiSearchActivity : ComponentActivity() {
         val (width, height) = getEmojiKeyDimensions(keyboardParams, this)
         keyWidth = width
         keyHeight = height
-        emojiPageKeyboardView = EmojiPageKeyboardView(this, null)
-        emojiPageKeyboardView.setKeyboard(keyboard)
-        emojiPageKeyboardView.layoutParams =
-            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        emojiPageKeyboardView.background = null
-        colors.setBackground(emojiPageKeyboardView, ColorType.MAIN_BACKGROUND)
-        emojiPageKeyboardView.setPadding(0, 10, 0, 10)
         loadEmojiDefaultVersionsAndPopupSpecs(this)
-
-        emojiPageKeyboardView.setEmojiViewCallback(object : EmojiViewCallback {
+        val callback = object : EmojiViewCallback {
             override fun onPressKey(key: Key) {
             }
 
@@ -320,10 +344,20 @@ class EmojiSearchActivity : ComponentActivity() {
             }
 
             override fun getDescription(emoji: String): String? = if (Settings.getValues().mShowEmojiDescriptions)
-                dictionaryFacilitator?.getWordProperty(getEmojiNeutralVersion(emoji))?.let {
+                EmojiSearchRepository.description(getEmojiNeutralVersion(emoji))
+                    ?: dictionaryFacilitator?.getWordProperty(getEmojiNeutralVersion(emoji))?.let {
                     if (it.mHasShortcuts) it.mShortcutTargets[0]?.mWord else null
                 } else null
-        })
+        }
+        emojiSearchAdapter = EmojiSearchAdapter(this, keyboard, keyboardParams, keyboardWidth, keyWidth, keyHeight, callback)
+        emojiResultsView = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@EmojiSearchActivity)
+            adapter = emojiSearchAdapter
+            setPadding(0, 10, 0, 10)
+            clipToPadding = true
+            colors.setBackground(this, ColorType.MAIN_BACKGROUND)
+        }
+        layoutVersion++
         KeyboardSwitcher.getInstance().setAlphabetKeyboard(ShiftMode.UNSHIFT)
         Log.d(TAG, "init end")
     }
@@ -332,43 +366,44 @@ class EmojiSearchActivity : ComponentActivity() {
         setOf(KeyboardSwitcher.KeyboardSwitchState.EMOJI, KeyboardSwitcher.KeyboardSwitchState.CLIPBOARD)
 
     private fun search(text: String) {
-        initDictionaryFacilitator(this)
-        if (dictionaryFacilitator == null) {
-            cancel()
-            return
-        }
-
         if (firstSearchDone && text == searchText) {
             return
         }
-
-        if (KeyboardSwitcher.getInstance().keyboard == null) {
-            /** Avoid crash in [SingleDictionaryFacilitator.getSuggestions] */
-            return
-        }
-
-        val keyboard = emojiPageKeyboardView.keyboard as DynamicGridKeyboard
-        keyboard.removeAllKeys()
-        firstKey = null
-        pressedKey = null
-        dictionaryFacilitator!!.getSuggestions(text.splitOnWhitespace()).filter { it.isEmoji }.forEach {
-            val emoji = getEmojiDefaultVersion(it.word)
-            val popupSpec = getEmojiPopupSpec(emoji)
-            val keyParams = Key.KeyParams(emoji, emoji.getCode(), if (popupSpec != null) EMOJI_HINT_LABEL else null, popupSpec,
-                Key.LABEL_FLAGS_FONT_NORMAL, keyboardParams)
-            keyParams.mAbsoluteWidth = keyWidth
-            keyParams.mAbsoluteHeight = keyHeight
-            val key = keyParams.createKey()
-            keyboard.addKeyLast(key)
-            if (firstKey == null) firstKey = key
-        }
-        emojiPageKeyboardView.invalidate()
-
         searchText = text
-        firstSearchDone = true
-        if (imeVisible && !imeOpened) {
-            Log.d(TAG, "IME opened in search")
-            imeOpened = true
+        searchJob?.cancel()
+        emojiSearchAdapter.submit(emptyList())
+        resultCount = -1
+        pressedKey = null
+        searchJob = searchScope.launch {
+            val builtIn = withContext(Dispatchers.IO) {
+                EmojiSearchRepository.load(this@EmojiSearchActivity)
+                if (text.isBlank()) emptyList() else EmojiSearchRepository.search(this@EmojiSearchActivity, text)
+            }
+            val emojis = LinkedHashSet<String>()
+            builtIn.asSequence()
+                .map { getEmojiDefaultVersion(it.emoji) }
+                .filterNot(SupportedEmojis::isUnsupported)
+                .forEach(emojis::add)
+
+            if (text.isBlank()) {
+                EmojiSearchRepository.initialResults(this@EmojiSearchActivity).forEach(emojis::add)
+            } else {
+                initDictionaryFacilitator(this@EmojiSearchActivity)
+                if (dictionaryFacilitator != null && KeyboardSwitcher.getInstance().keyboard != null) {
+                    dictionaryFacilitator!!.getSuggestions(text.splitOnWhitespace()).asSequence()
+                        .filter { it.isEmoji }
+                        .map { getEmojiDefaultVersion(it.word) }
+                        .filterNot(SupportedEmojis::isUnsupported)
+                        .forEach(emojis::add)
+                }
+            }
+            emojiSearchAdapter.submit(emojis.toList())
+            resultCount = emojis.size
+            firstSearchDone = true
+            if (imeVisible && !imeOpened) {
+                Log.d(TAG, "IME opened in search")
+                imeOpened = true
+            }
         }
     }
 
@@ -383,13 +418,15 @@ class EmojiSearchActivity : ComponentActivity() {
         const val EMOJI_SEARCH_DONE_ACTION: String = "EMOJI_SEARCH_DONE"
         const val IME_CLOSED_KEY: String = "IME_CLOSED"
         const val EMOJI_KEY: String = "EMOJI"
+        const val SOURCE_INCOGNITO: String = "SOURCE_INCOGNITO"
         private const val PRIVATE_IME_OPTIONS_PREFIX: String = "com.youboard.keyboard.keyboard.emoji.search"
         private var dictionaryFacilitator: SingleDictionaryFacilitator? = null
         private var searchText: String = ""
 
         fun decodePrivateImeOptions(editorInfo: EditorInfo?): PrivateImeOptions = PrivateImeOptions(
-            editorInfo?.privateImeOptions?.takeIf { it.startsWith(PRIVATE_IME_OPTIONS_PREFIX) }
-                ?.let { it.substring(PRIVATE_IME_OPTIONS_PREFIX.length + 1, it.indexOf(',')) }?.toInt() ?: 0)
+            editorInfo?.privateImeOptions?.takeIf { it.startsWith("$PRIVATE_IME_OPTIONS_PREFIX.") }
+                ?.substringAfter("$PRIVATE_IME_OPTIONS_PREFIX.")?.substringBefore(',')
+                ?.toIntOrNull()?.coerceAtLeast(0) ?: 0)
 
         fun closeDictionaryFacilitator() {
             dictionaryFacilitator?.closeDictionaries()

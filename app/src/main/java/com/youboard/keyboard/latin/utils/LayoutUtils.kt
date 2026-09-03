@@ -7,7 +7,6 @@ import com.youboard.keyboard.latin.R
 import com.youboard.keyboard.latin.settings.Defaults.default
 import com.youboard.keyboard.latin.utils.LayoutType.Companion.folder
 import com.youboard.keyboard.latin.utils.ScriptUtils.script
-import java.io.File
 import java.util.Locale
 
 // for layouts provided by the app

@@ -15,6 +15,31 @@
     android:background="@android:color/transparent"
     style="?attr/emojiPalettesViewStyle"
 >
+    <LinearLayout
+        android:id="@+id/emoji_search_button"
+        android:layout_width="match_parent"
+        android:layout_height="40dip"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:clickable="true"
+        android:focusable="true"
+        android:contentDescription="@string/emoji_search_title"
+        android:paddingStart="12dip"
+        android:paddingEnd="12dip">
+        <ImageView
+            android:id="@+id/emoji_search_icon"
+            android:layout_width="24dip"
+            android:layout_height="24dip"
+            android:src="@drawable/sym_keyboard_search_rounded"
+            android:contentDescription="@null" />
+        <TextView
+            android:id="@+id/emoji_search_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dip"
+            android:text="@string/emoji_search_title"
+            android:textSize="16sp" />
+    </LinearLayout>
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/emoji_pager"
         android:layout_width="match_parent"
