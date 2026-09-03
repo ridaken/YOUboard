@@ -66,6 +66,11 @@
     <string name="settings_category_miscellaneous">Miscellaneous</string>
     <!-- Option for enabling or disabling the split keyboard layout in portrait mode.-->
     <string name="enable_split_keyboard">Enable split keyboard</string>
+    <string name="split_unfolded_portrait">Unfolded portrait</string>
+    <string name="split_unfolded_landscape">Unfolded landscape</string>
+    <string name="split_mode_automatic">Automatic</string>
+    <string name="split_mode_standard">Standard</string>
+    <string name="split_automatic_summary">Automatically split on wide unfolded inner screens. Floating and one-handed modes pause automatic splitting. Folded settings stay independent.</string>
     <!-- Option for setting distance for split keyboard in portrait mode -->
     <string name="split_spacer_scale">Split distance</string>
     <!-- Option name for including other IMEs in the language key switch list -->

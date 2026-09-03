@@ -36,7 +36,8 @@ data class KeyboardId(
     val isSplitLayout: Boolean,
     val oneHandedModeEnabled: Boolean,
     val internalAction: KeyboardLayoutSet.InternalAction?,
-    val emojiSearchAvailable: Boolean
+    val emojiSearchAvailable: Boolean,
+    val splitSpacerRelativeWidth: Float = 0f,
 ) {
     lateinit var editorInfo: EditorInfo // we don't want it in the data class constructor
 
@@ -60,6 +61,7 @@ data class KeyboardId(
         params.oneHandedModeEnabled,
         params.internalAction,
         params.emojiSearchAvailable,
+        params.splitSpacerRelativeWidth,
     ) {
         editorInfo = params.editorInfo
     }

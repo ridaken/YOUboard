@@ -397,6 +397,20 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
 
     public void writeOneHandedModeEnabled(final boolean enabled) {
         final boolean landscape = mSettingsValues.mDisplayOrientation == Configuration.ORIENTATION_LANDSCAPE;
+        final boolean folded = FoldableUtils.INSTANCE.isFolded();
+        if (!folded && FoldableUtils.INSTANCE.isFoldable() && SplitKeyboardSettings.mode(mPrefs,
+                SplitKeyboardSettings.key(landscape, folded)) == SplitKeyboardSettings.Mode.AUTOMATIC) {
+            // Automatic split pauses in one-handed mode. Keep both mode profiles in sync so
+            // leaving one-handed mode can restore the automatic split without a preference loop.
+            SharedPreferences.Editor editor = mPrefs.edit();
+            for (boolean split : new boolean[] { false, true }) {
+                int profile = SettingsKt.findIndexOfDefaultSetting(landscape, split, folded);
+                editor.putBoolean(SettingsKt.createPrefKeyForBooleanSettings(PREF_ONE_HANDED_MODE_PREFIX, profile, 3), enabled);
+                editor.putInt(SettingsKt.createPrefKeyForBooleanSettings(PREF_ONE_HANDED_GRAVITY_PREFIX, profile, 3), mSettingsValues.mOneHandedModeGravity);
+            }
+            editor.apply();
+            return;
+        }
         int index = SettingsKt.findIndexOfDefaultSetting(landscape, mSettingsValues.mIsSplitKeyboardEnabled, FoldableUtils.INSTANCE.isFolded());
         String key = SettingsKt.createPrefKeyForBooleanSettings(PREF_ONE_HANDED_MODE_PREFIX, index, 3);
         mPrefs.edit().putBoolean(key, enabled).apply();
@@ -429,17 +443,14 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     }
 
     public void writeSplitKeyboardEnabled(boolean enabled, boolean isLandscape, boolean isFolded) {
-        String pref = isLandscape
-                        ? (isFolded ? PREF_ENABLE_SPLIT_KEYBOARD_FOLDED_LANDSCAPE : PREF_ENABLE_SPLIT_KEYBOARD_LANDSCAPE)
-                        : (isFolded ? PREF_ENABLE_SPLIT_KEYBOARD_FOLDED : PREF_ENABLE_SPLIT_KEYBOARD);
+        String pref = SplitKeyboardSettings.key(isLandscape, isFolded);
         mPrefs.edit().putBoolean(pref, enabled).apply();
     }
 
-    public static boolean readSplitKeyboardEnabled(SharedPreferences prefs, boolean isLandscape, boolean isFolded) {
-        String pref = isLandscape
-                      ? (isFolded ? PREF_ENABLE_SPLIT_KEYBOARD_FOLDED_LANDSCAPE : PREF_ENABLE_SPLIT_KEYBOARD_LANDSCAPE)
-                      : (isFolded ? PREF_ENABLE_SPLIT_KEYBOARD_FOLDED : PREF_ENABLE_SPLIT_KEYBOARD);
-        return prefs.getBoolean(pref, Defaults.PREF_ENABLE_SPLIT_KEYBOARD);
+    public static boolean readSplitKeyboardEnabled(SharedPreferences prefs, boolean isLandscape,
+            boolean isFolded, boolean floating, boolean oneHanded) {
+        return SplitKeyboardSettings.resolve(prefs, isLandscape, isFolded,
+                FoldableUtils.INSTANCE.getSnapshot(), floating, oneHanded);
     }
 
     public static float readSplitSpacerScale(SharedPreferences prefs, boolean landscape, boolean folded) {

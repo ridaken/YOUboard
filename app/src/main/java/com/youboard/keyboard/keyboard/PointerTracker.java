@@ -233,6 +233,16 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         sPointerTrackerQueue.cancelAllPointerTrackers();
     }
 
+    public static void cancelGestureForLayoutChange() {
+        for (PointerTracker tracker : sTrackers) {
+            tracker.mIsDetectingGesture = false;
+        }
+        if (sInGesture) {
+            sInGesture = false;
+            sListener.onCancelBatchInput();
+        }
+    }
+
     public static void suppressShiftLongPress() {
         sIsShiftLongPressSuppressed = true;
     }

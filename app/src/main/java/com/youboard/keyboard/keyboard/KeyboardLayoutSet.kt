@@ -128,6 +128,7 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
 
         // Indicates if the user has enabled the split-layout preference and the required ProductionFlags are enabled.
         var isSplitLayoutEnabled = false
+        var splitSpacerRelativeWidth = 0f
     }
 
     class Builder(private val mContext: Context, ei: EditorInfo?) {
@@ -191,6 +192,7 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
 
         fun setSplitLayoutEnabled(enabled: Boolean): Builder {
             params.isSplitLayoutEnabled = enabled
+            params.splitSpacerRelativeWidth = if (enabled) Settings.getValues().mSplitKeyboardSpacerRelativeWidth else 0f
             return this
         }
 

@@ -213,6 +213,13 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         final MainKeyboardView keyboardView = mKeyboardView;
         final Keyboard oldKeyboard = keyboardView.getKeyboard();
         final Keyboard newKeyboard = mKeyboardLayoutSet.getKeyboard(keyboardElement);
+        if (oldKeyboard != null && (oldKeyboard.mId.getWidth() != newKeyboard.mId.getWidth()
+                || oldKeyboard.mId.getHeight() != newKeyboard.mId.getHeight()
+                || oldKeyboard.mId.isSplitLayout() != newKeyboard.mId.isSplitLayout()
+                || oldKeyboard.mId.getSplitSpacerRelativeWidth() != newKeyboard.mId.getSplitSpacerRelativeWidth())) {
+            keyboardView.cancelAllOngoingEvents();
+            mLatinIME.onKeyboardGeometryChanged();
+        }
         keyboardView.setKeyboard(newKeyboard);
         mCurrentInputView.setKeyboardTopPadding(newKeyboard.mTopPadding);
         keyboardView.setKeyPreviewPopupEnabled(currentSettingsValues.mKeyPreviewPopupOn);
@@ -539,6 +546,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     public void reloadMainKeyboard() {
         // Reload the entire keyboard, and switch to the previous layout
+        saveKeyboardState();
         final boolean wasEmoji = isShowingEmojiPalettes();
         final boolean wasClipboard = isShowingClipboardHistory();
         loadKeyboard(mLatinIME.getCurrentInputEditorInfo(), Settings.getValues(),
