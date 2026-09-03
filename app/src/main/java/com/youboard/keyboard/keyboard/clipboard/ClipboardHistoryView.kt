@@ -34,9 +34,9 @@ import com.youboard.keyboard.latin.settings.Settings
 import com.youboard.keyboard.latin.utils.ResourceUtils
 import com.youboard.keyboard.latin.utils.ToolbarKey
 import com.youboard.keyboard.latin.utils.createToolbarKey
-import com.youboard.keyboard.latin.utils.getCodeForToolbarKey
-import com.youboard.keyboard.latin.utils.getCodeForToolbarKeyLongClick
 import com.youboard.keyboard.latin.utils.getEnabledClipboardToolbarKeys
+import com.youboard.keyboard.latin.utils.onClickToolbarKey
+import com.youboard.keyboard.latin.utils.onLongClickToolbarKey
 import com.youboard.keyboard.latin.utils.prefs
 import com.youboard.keyboard.latin.utils.setToolbarButtonsActivatedStateOnPrefChange
 
@@ -70,10 +70,8 @@ class ClipboardHistoryView @JvmOverloads constructor(
         val keyboardViewAttr = context.obtainStyledAttributes(attrs, R.styleable.KeyboardView, defStyle, R.style.KeyboardView)
         keyBackgroundId = keyboardViewAttr.getResourceId(R.styleable.KeyboardView_keyBackground, 0)
         keyboardViewAttr.recycle()
-        if (Settings.getValues().mSecondaryStripVisible) {
-            getEnabledClipboardToolbarKeys(context.prefs())
-                .forEach { toolbarKeys.add(createToolbarKey(context, it)) }
-        }
+        getEnabledClipboardToolbarKeys(context.prefs())
+            .forEach { toolbarKeys.add(createToolbarKey(context, it)) }
         fitsSystemWindows = true
     }
 
@@ -200,29 +198,17 @@ class ClipboardHistoryView @JvmOverloads constructor(
     }
 
     override fun onClick(view: View) {
-        val tag = view.tag
-        if (tag is ToolbarKey) {
-            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
-            val code = getCodeForToolbarKey(tag)
-            if (code != KeyCode.UNSPECIFIED) {
-                keyboardActionListener.onCodeInput(code, Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, false)
-                return
+        if (view.tag is ToolbarKey) {
+            onClickToolbarKey(view) {
+                keyboardActionListener.onCodeInput(it, Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, false)
             }
         }
     }
 
     override fun onLongClick(view: View): Boolean {
-        val tag = view.tag
-        if (tag is ToolbarKey) {
-            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_LONG_PRESS)
-            val longClickCode = getCodeForToolbarKeyLongClick(tag)
-            if (longClickCode != KeyCode.UNSPECIFIED) {
-                keyboardActionListener.onCodeInput(
-                    longClickCode,
-                    Constants.NOT_A_COORDINATE,
-                    Constants.NOT_A_COORDINATE,
-                    false
-                )
+        if (view.tag is ToolbarKey) {
+            onLongClickToolbarKey(view) { code, isRepeat ->
+                keyboardActionListener.onCodeInput(code, Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, isRepeat)
             }
             return true
         }
@@ -230,7 +216,7 @@ class ClipboardHistoryView @JvmOverloads constructor(
     }
 
     override fun onKeyDown(clipId: Long) {
-        keyboardActionListener.onPressKey(KeyCode.NOT_SPECIFIED, 0, true, HapticEvent.KEY_PRESS)
+        keyboardActionListener.onPressKey(KeyCode.NOT_SPECIFIED, 0, 1, HapticEvent.KEY_PRESS)
     }
 
     override fun onKeyUp(clipId: Long) {

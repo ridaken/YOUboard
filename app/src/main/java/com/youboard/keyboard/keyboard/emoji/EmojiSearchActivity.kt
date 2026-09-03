@@ -84,6 +84,7 @@ import com.youboard.keyboard.keyboard.KeyboardTheme
 import com.youboard.keyboard.keyboard.KeyboardTypeface
 import com.youboard.keyboard.keyboard.internal.KeyboardBuilder
 import com.youboard.keyboard.keyboard.internal.KeyboardParams
+import com.youboard.keyboard.keyboard.internal.ShiftMode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiDefaultVersion
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiKeyDimensions
@@ -99,13 +100,11 @@ import com.youboard.keyboard.latin.common.splitOnWhitespace
 import com.youboard.keyboard.latin.dictionary.Dictionary
 import com.youboard.keyboard.latin.dictionary.DictionaryFactory
 import com.youboard.keyboard.latin.settings.Settings
-import com.youboard.keyboard.latin.settings.Defaults
 import com.youboard.keyboard.latin.utils.CloseIcon
 import com.youboard.keyboard.latin.utils.DictionaryInfoUtils
 import com.youboard.keyboard.latin.utils.Log
 import com.youboard.keyboard.latin.utils.ResourceUtils
 import com.youboard.keyboard.latin.utils.SearchIcon
-import com.youboard.keyboard.latin.utils.JsonUtils
 import com.youboard.keyboard.latin.utils.prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -359,7 +358,7 @@ class EmojiSearchActivity : ComponentActivity() {
             colors.setBackground(this, ColorType.MAIN_BACKGROUND)
         }
         layoutVersion++
-        KeyboardSwitcher.getInstance().setAlphabetKeyboard()
+        KeyboardSwitcher.getInstance().setAlphabetKeyboard(ShiftMode.UNSHIFT)
         Log.d(TAG, "init end")
     }
 
@@ -387,7 +386,7 @@ class EmojiSearchActivity : ComponentActivity() {
                 .forEach(emojis::add)
 
             if (text.isBlank()) {
-                fallbackEmojis().forEach(emojis::add)
+                EmojiSearchRepository.initialResults(this@EmojiSearchActivity).forEach(emojis::add)
             } else {
                 initDictionaryFacilitator(this@EmojiSearchActivity)
                 if (dictionaryFacilitator != null && KeyboardSwitcher.getInstance().keyboard != null) {
@@ -406,22 +405,6 @@ class EmojiSearchActivity : ComponentActivity() {
                 imeOpened = true
             }
         }
-    }
-
-    private fun fallbackEmojis(): List<String> {
-        val recent = JsonUtils.jsonStrToList(
-            prefs().getString(Settings.PREF_EMOJI_RECENT_KEYS, Defaults.PREF_EMOJI_RECENT_KEYS) ?: ""
-        ).mapNotNull {
-            when (it) {
-                is Int -> String(Character.toChars(it))
-                is String -> it
-                else -> null
-            }
-        }.filterNot(SupportedEmojis::isUnsupported)
-        if (recent.isNotEmpty()) return recent
-        return assets.open("emoji/SMILEYS_AND_EMOTION.txt").bufferedReader().useLines { lines ->
-            lines.map { it.splitOnWhitespace().first() }.take(24).toList()
-        }.filterNot(SupportedEmojis::isUnsupported)
     }
 
     private fun cancel() {

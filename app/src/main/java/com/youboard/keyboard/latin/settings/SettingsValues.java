@@ -22,6 +22,7 @@ import com.youboard.keyboard.compat.ConfigurationCompatKt;
 import com.youboard.keyboard.compat.IsLockedCompatKt;
 import com.youboard.keyboard.keyboard.KeyboardActionListener;
 import com.youboard.keyboard.keyboard.KeyboardTheme;
+import com.youboard.keyboard.keyboard.internal.KeyboardState;
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.LocaleKeyboardInfos;
 import com.youboard.keyboard.latin.InputAttributes;
 import com.youboard.keyboard.latin.PunctuationSuggestions;
@@ -37,6 +38,7 @@ import com.youboard.keyboard.latin.utils.SubtypeSettings;
 import com.youboard.keyboard.latin.utils.SubtypeUtilsKt;
 import com.youboard.keyboard.latin.utils.ToolbarMode;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 
@@ -117,7 +119,6 @@ public class SettingsValues {
     public final boolean mIsSplitKeyboardEnabled;
     public final float mSplitKeyboardSpacerRelativeWidth;
     public final boolean mQuickPinToolbarKeys;
-    public final int mScreenMetrics;
     public final boolean mAddToPersonalDictionary;
     public final boolean mUseContactsDictionary;
     public final boolean mUseAppsDictionary;
@@ -134,8 +135,7 @@ public class SettingsValues {
     public final boolean mAutoHideToolbar;
     public final boolean mAlphaAfterEmojiInEmojiView;
     public final boolean mAlphaAfterClipHistoryEntry;
-    public final boolean mAlphaAfterSymbolAndSpace;
-    public final boolean mAlphaAfterNumpadAndSpace;
+    public final EnumSet<KeyboardState.Mode> mAlphaAfterSpace = EnumSet.noneOf(KeyboardState.Mode.class);
     public final boolean mRemoveRedundantPopups;
     public final String mSpaceBarText;
     public final float mFontSizeMultiplier;
@@ -146,6 +146,17 @@ public class SettingsValues {
     public final boolean mIsFloatingKeyboard;
     public final int mFloatingWidth;
     public final int mFloatingHeight;
+    public final int mKeypressVibrationDuration;
+    public final float mKeypressSoundVolume;
+    public final boolean mAutoCorrectionEnabledPerUserSettings;
+    public final boolean mAutoCorrectCapitalizedSuggestion;
+    public final boolean mBackspaceRevertsAutocorrect;
+    public final boolean mAutoCorrectShortcuts;
+    public final boolean mSuggestionsEnabled;
+    private final boolean mOverrideShowingSuggestions;
+    public final boolean mSuggestClipboardContent;
+    public final boolean mIncognitoModeEnabled;
+    public final boolean mLongPressSymbolsForNumpad;
 
     // From the input box
     @NonNull
@@ -153,22 +164,10 @@ public class SettingsValues {
 
     // Deduced settings
     public final boolean mSuggestionStripHiddenPerUserSettings;
-    public final boolean mSecondaryStripVisible;
-    public final int mKeypressVibrationDuration;
-    public final float mKeypressSoundVolume;
-    public final boolean mAutoCorrectionEnabledPerUserSettings;
     public final boolean mAutoCorrectEnabled;
     public final float mAutoCorrectionThreshold;
-    public final boolean mAutoCorrectCapitalizedSuggestion;
-    public final boolean mBackspaceRevertsAutocorrect;
     public final int mScoreLimitForAutocorrect;
-    public final boolean mAutoCorrectShortcuts;
-    public final boolean mSuggestionsEnabled;
-    private final boolean mOverrideShowingSuggestions;
-    public final boolean mSuggestClipboardContent;
     public final SettingsValuesForSuggestion mSettingsValuesForSuggestion;
-    public final boolean mIncognitoModeEnabled;
-    public final boolean mLongPressSymbolsForNumpad;
     public final boolean mIsLocked;
 
     // User-defined colors
@@ -240,16 +239,18 @@ public class SettingsValues {
         mSuggestClipboardContent = prefs.getBoolean(Settings.PREF_SUGGEST_CLIPBOARD_CONTENT, Defaults.PREF_SUGGEST_CLIPBOARD_CONTENT);
         mDoubleSpacePeriodTimeout = 1100; // ms
         mHasHardwareKeyboard = Settings.readHasHardwareKeyboard(res.getConfiguration());
-        final boolean isLandscape = mDisplayOrientation == Configuration.ORIENTATION_LANDSCAPE;
-        final float displayWidthDp = TypedValueCompat.pxToDp(res.getDisplayMetrics().widthPixels, res.getDisplayMetrics());
+        boolean isLandscape = mDisplayOrientation == Configuration.ORIENTATION_LANDSCAPE;
         boolean isFolded = FoldableUtils.INSTANCE.isFolded();
-        mIsSplitKeyboardEnabled = Settings.readSplitKeyboardEnabled(prefs, isLandscape, isFolded);
-        // determine spacerWidth from display width and scale setting
-        mSplitKeyboardSpacerRelativeWidth = mIsSplitKeyboardEnabled
-                ? Math.min(Math.max((displayWidthDp - 600) / 600f + 0.15f, 0.15f), 0.35f) * Settings.readSplitSpacerScale(prefs, isLandscape, isFolded)
-                : 0f;
+        mIsFloatingKeyboard = !mIsLocked && SettingsKt.isFloatingKeyboardEnabled(context);
+        boolean automaticSplit = !isFolded && FoldableUtils.INSTANCE.isFoldable()
+                && SplitKeyboardSettings.mode(prefs, SplitKeyboardSettings.key(isLandscape, false))
+                == SplitKeyboardSettings.Mode.AUTOMATIC;
+        boolean automaticOneHanded = automaticSplit && (
+                Settings.readOneHandedModeEnabled(prefs, isLandscape, false, false)
+                || Settings.readOneHandedModeEnabled(prefs, isLandscape, true, false));
+        mIsSplitKeyboardEnabled = Settings.readSplitKeyboardEnabled(prefs, isLandscape, isFolded,
+                mIsFloatingKeyboard, automaticOneHanded);
         mQuickPinToolbarKeys = mToolbarMode == ToolbarMode.EXPANDABLE && prefs.getBoolean(Settings.PREF_QUICK_PIN_TOOLBAR_KEYS, Defaults.PREF_QUICK_PIN_TOOLBAR_KEYS);
-        mScreenMetrics = Settings.readScreenMetrics(res);
 
         // Compute other readable settings
         mKeyLongpressTimeout = prefs.getInt(Settings.PREF_KEY_LONGPRESS_TIMEOUT, Defaults.PREF_KEY_LONGPRESS_TIMEOUT);
@@ -270,7 +271,6 @@ public class SettingsValues {
                   || !prefs.getBoolean(Settings.PREF_ALWAYS_SHOW_SUGGESTIONS_EXCEPT_WEB_TEXT, Defaults.PREF_ALWAYS_SHOW_SUGGESTIONS_EXCEPT_WEB_TEXT));
         mSuggestionsEnabled = prefs.getBoolean(Settings.PREF_SHOW_SUGGESTIONS, Defaults.PREF_SHOW_SUGGESTIONS)
             && (mInputAttributes.mShouldShowSuggestions || mOverrideShowingSuggestions) && !mSuggestionStripHiddenPerUserSettings;
-        mSecondaryStripVisible = mToolbarMode != ToolbarMode.HIDDEN || ! mToolbarHidingGlobal;
         mIncognitoModeEnabled = prefs.getBoolean(Settings.PREF_ALWAYS_INCOGNITO_MODE, Defaults.PREF_ALWAYS_INCOGNITO_MODE) || mInputAttributes.mNoLearning
                 || mInputAttributes.mIsPasswordField;
         mBottomRowScale = Settings.readBottomRowScale(prefs, isLandscape, isFolded);
@@ -290,12 +290,12 @@ public class SettingsValues {
         mClipboardHistoryRetentionTime = prefs.getInt(Settings.PREF_CLIPBOARD_HISTORY_RETENTION_TIME, Defaults.PREF_CLIPBOARD_HISTORY_RETENTION_TIME);
         mClipboardHistoryPinnedFirst = prefs.getBoolean(Settings.PREF_CLIPBOARD_HISTORY_PINNED_FIRST, Defaults.PREF_CLIPBOARD_HISTORY_PINNED_FIRST);
 
-        mIsFloatingKeyboard = !mIsLocked && SettingsKt.isFloatingKeyboardEnabled(context);
         mFloatingWidth = SettingsKt.readFloatingWidth(context);
         mFloatingHeight = mIsFloatingKeyboard && mHasHardwareKeyboard && prefs.getBoolean(Settings.PREF_SHOW_ONLY_TOOLBAR_WITH_HARDWARE_KEYBOARD, Defaults.PREF_SHOW_ONLY_TOOLBAR_WITH_HARDWARE_KEYBOARD)
                           ? 0 : SettingsKt.readFloatingHeight(context);
         mKeyboardHeightScale = mIsFloatingKeyboard ? 1f : Settings.readHeightScale(prefs, isLandscape, isFolded);
-        mOneHandedModeEnabled = !mIsFloatingKeyboard && Settings.readOneHandedModeEnabled(prefs, isLandscape, mIsSplitKeyboardEnabled, isFolded);
+        mOneHandedModeEnabled = !mIsFloatingKeyboard && (automaticOneHanded
+                || Settings.readOneHandedModeEnabled(prefs, isLandscape, mIsSplitKeyboardEnabled, isFolded));
         mOneHandedModeGravity = Settings.readOneHandedModeGravity(prefs, isLandscape, mIsSplitKeyboardEnabled, isFolded);
         if (mOneHandedModeEnabled) {
             final float baseScale = res.getFraction(R.fraction.config_one_handed_mode_width, 1, 1);
@@ -303,6 +303,15 @@ public class SettingsValues {
             mOneHandedModeScale = 1 - (1 - baseScale) * extraScale;
         } else
             mOneHandedModeScale = 1f;
+        // Preserve existing folded profiles, including manually split floating/one-handed layouts.
+        float keyboardWidthDp = TypedValueCompat.pxToDp(
+                isFolded ? res.getDisplayMetrics().widthPixels
+                        : com.youboard.keyboard.latin.utils.ResourceUtils.getKeyboardWidth(context, this),
+                res.getDisplayMetrics());
+        mSplitKeyboardSpacerRelativeWidth = mIsSplitKeyboardEnabled
+                ? Math.min(Math.max((keyboardWidthDp - 600) / 600f + 0.15f, 0.15f), 0.35f)
+                    * Settings.readSplitSpacerScale(prefs, isLandscape, isFolded)
+                : 0f;
         mSecondaryLocales = SubtypeUtilsKt.getSecondaryLocales(selectedSubtype.getExtraValue());
         mShowMorePopupKeys = SubtypeUtilsKt.getMoreKeys(selectedSubtype, prefs,
             selectedSubtype.isAsciiCapable() ? Defaults.PREF_MORE_POPUP_KEYS : LocaleKeyboardInfos.POPUP_KEYS_NORMAL);
@@ -327,8 +336,13 @@ public class SettingsValues {
         mAutoHideToolbar = mSuggestionsEnabled && prefs.getBoolean(Settings.PREF_AUTO_HIDE_TOOLBAR, Defaults.PREF_AUTO_HIDE_TOOLBAR);
         mAlphaAfterEmojiInEmojiView = prefs.getBoolean(Settings.PREF_ABC_AFTER_EMOJI, Defaults.PREF_ABC_AFTER_EMOJI);
         mAlphaAfterClipHistoryEntry = prefs.getBoolean(Settings.PREF_ABC_AFTER_CLIP, Defaults.PREF_ABC_AFTER_CLIP);
-        mAlphaAfterSymbolAndSpace = prefs.getBoolean(Settings.PREF_ABC_AFTER_SYMBOL_SPACE, Defaults.PREF_ABC_AFTER_SYMBOL_SPACE);
-        mAlphaAfterNumpadAndSpace = prefs.getBoolean(Settings.PREF_ABC_AFTER_NUMPAD_SPACE, Defaults.PREF_ABC_AFTER_NUMPAD_SPACE);
+        if (prefs.getBoolean(Settings.PREF_ABC_AFTER_SYMBOL_SPACE, Defaults.PREF_ABC_AFTER_SYMBOL_SPACE)) {
+            mAlphaAfterSpace.add(KeyboardState.Mode.SYMBOLS);
+            mAlphaAfterSpace.add(KeyboardState.Mode.SYMBOLS_SHIFTED);
+        }
+        if (prefs.getBoolean(Settings.PREF_ABC_AFTER_NUMPAD_SPACE, Defaults.PREF_ABC_AFTER_NUMPAD_SPACE)) {
+            mAlphaAfterSpace.add(KeyboardState.Mode.NUMPAD);
+        }
         mRemoveRedundantPopups = prefs.getBoolean(Settings.PREF_REMOVE_REDUNDANT_POPUPS, Defaults.PREF_REMOVE_REDUNDANT_POPUPS);
         mSpaceBarText = prefs.getString(Settings.PREF_SPACE_BAR_TEXT, Defaults.PREF_SPACE_BAR_TEXT);
         mFontSizeMultiplier = prefs.getFloat(Settings.PREF_FONT_SCALE, Defaults.PREF_FONT_SCALE);
@@ -388,6 +402,10 @@ public class SettingsValues {
 
     public boolean hasSameOrientation(final Configuration configuration) {
         return mDisplayOrientation == configuration.orientation;
+    }
+
+    public boolean isSecondaryStripVisible() {
+        return mToolbarMode != ToolbarMode.HIDDEN || !mToolbarHidingGlobal;
     }
 
     private static boolean readUseContactsEnabled(final SharedPreferences prefs, final Context ctx) {

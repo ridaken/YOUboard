@@ -2,6 +2,7 @@
 package com.youboard.keyboard.keyboard.emoji
 
 import android.content.Context
+import com.youboard.keyboard.latin.common.splitOnWhitespace
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
@@ -40,6 +41,14 @@ internal object EmojiSearchRepository {
     fun search(context: Context, query: String): List<Entry> = searchEntries(load(context), query)
 
     fun description(emoji: String): String? = names[normalizeEmoji(emoji)]
+
+    fun initialResults(context: Context): List<String> {
+        val recent = RecentEmojis.get().filterNot(SupportedEmojis::isUnsupported)
+        if (recent.isNotEmpty()) return recent
+        return context.assets.open("emoji/SMILEYS_AND_EMOTION.txt").bufferedReader().useLines { lines ->
+            lines.map { it.splitOnWhitespace().first() }.take(24).toList()
+        }.filterNot(SupportedEmojis::isUnsupported)
+    }
 
     internal fun searchEntries(source: List<Entry>, query: String): List<Entry> {
         val terms = tokenize(query)

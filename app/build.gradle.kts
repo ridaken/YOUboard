@@ -19,8 +19,8 @@ android {
         minSdk = 21
         targetSdk = 36
         // CI overrides these via -PversionCodeOverride / -PversionNameOverride; local builds use the defaults.
-        versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt() ?: 4003
-        versionName = (project.findProperty("versionNameOverride") as String?) ?: "4.0-beta1"
+        versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt() ?: 4101
+        versionName = (project.findProperty("versionNameOverride") as String?) ?: "4.1"
         ndk {
             abiFilters.clear()
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
@@ -151,6 +151,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("androidx.autofill:autofill:1.3.0")
     implementation("androidx.viewpager2:viewpager2:1.1.0")
+    implementation("androidx.window:window:1.4.0")
 
     // kotlin
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")

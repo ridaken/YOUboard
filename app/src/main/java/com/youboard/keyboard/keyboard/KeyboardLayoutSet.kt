@@ -50,7 +50,6 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
                 if (baseKeyboardLayoutSetElement == KeyboardElement.SYMBOLS) KeyboardElement.PHONE_SYMBOLS
                 else KeyboardElement.PHONE
             }
-            KeyboardMode.NUMPAD -> KeyboardElement.NUMPAD
             KeyboardMode.NUMBER, KeyboardMode.DATE, KeyboardMode.TIME, KeyboardMode.DATETIME -> KeyboardElement.NUMBER
             else -> baseKeyboardLayoutSetElement
         }
@@ -128,6 +127,7 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
 
         // Indicates if the user has enabled the split-layout preference and the required ProductionFlags are enabled.
         var isSplitLayoutEnabled = false
+        var splitSpacerRelativeWidth = 0f
     }
 
     class Builder(private val mContext: Context, ei: EditorInfo?) {
@@ -191,6 +191,7 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
 
         fun setSplitLayoutEnabled(enabled: Boolean): Builder {
             params.isSplitLayoutEnabled = enabled
+            params.splitSpacerRelativeWidth = if (enabled) Settings.getValues().mSplitKeyboardSpacerRelativeWidth else 0f
             return this
         }
 

@@ -3,7 +3,11 @@ package com.youboard.keyboard.keyboard.emoji
 
 import android.content.Context
 import android.view.inputmethod.EditorInfo
+import androidx.core.content.edit
 import androidx.test.core.app.ApplicationProvider
+import com.youboard.keyboard.latin.settings.Settings
+import com.youboard.keyboard.latin.utils.prefs
+import kotlinx.serialization.json.Json
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import kotlin.test.Test
@@ -66,4 +70,33 @@ class EmojiSearchRepositoryTest {
     }
 
     private fun search(query: String) = EmojiSearchRepository.searchEntries(entries, query)
+
+    @Test fun `initial results read the current recents format with complete sequences`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        Settings.init(context)
+        val recent = listOf("👋🏾", "👨‍👩‍👧‍👦", "💙")
+        context.prefs().edit {
+            putString(Settings.PREF_RECENT_EMOJIS, Json.encodeToString(recent))
+            putInt(Settings.PREF_EMOJI_MAX_SDK, Int.MAX_VALUE)
+        }
+        SupportedEmojis.load(context)
+
+        assertEquals(recent, EmojiSearchRepository.initialResults(context))
+    }
+
+    @Test fun `initial results filter unsupported recents and fall back to smileys`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        Settings.init(context)
+        context.prefs().edit { putInt(Settings.PREF_EMOJI_MAX_SDK, 22) }
+        SupportedEmojis.load(context)
+        RecentEmojis.set(listOf("🙃", "💙"))
+        assertEquals(listOf("💙"), EmojiSearchRepository.initialResults(context))
+
+        RecentEmojis.set(listOf("🙃"))
+        val fallback = EmojiSearchRepository.initialResults(context)
+        assertEquals("😀", fallback.first())
+        assertTrue(fallback.none(SupportedEmojis::isUnsupported))
+        RecentEmojis.set(emptyList())
+        assertEquals(fallback, EmojiSearchRepository.initialResults(context))
+    }
 }
