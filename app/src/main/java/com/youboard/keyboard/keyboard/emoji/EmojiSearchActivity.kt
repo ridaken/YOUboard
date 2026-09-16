@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
+import android.os.Looper
 import android.view.inputmethod.EditorInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -84,7 +85,6 @@ import com.youboard.keyboard.keyboard.KeyboardTheme
 import com.youboard.keyboard.keyboard.KeyboardTypeface
 import com.youboard.keyboard.keyboard.internal.KeyboardBuilder
 import com.youboard.keyboard.keyboard.internal.KeyboardParams
-import com.youboard.keyboard.keyboard.internal.ShiftMode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiDefaultVersion
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.getEmojiKeyDimensions
@@ -137,6 +137,7 @@ class EmojiSearchActivity : ComponentActivity() {
     private var layoutVersion by mutableIntStateOf(0)
     private val searchScope = MainScope()
     private var searchJob: Job? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     private val closer = Runnable {
         if (!imeVisible) {
@@ -168,8 +169,9 @@ class EmojiSearchActivity : ComponentActivity() {
                             imeVisible = bottom < screenHeight - 100
                             Log.d(TAG, "imeVisible: $imeVisible, firstSearchDone: $firstSearchDone, imeOpened: $imeOpened, " +
                                 "bottom: $bottom, keyboardState: ${KeyboardSwitcher.getInstance().keyboardSwitchState}")
+                            handler.removeCallbacks(closer)
                             if (imeOpened && !imeVisible) {
-                                Handler(this@EmojiSearchActivity.mainLooper).postDelayed(closer, 200)
+                                handler.postDelayed(closer, 200)
                             }
                             if (imeOpened && !isAlphaKeyboard()) {
                                 cancel()
@@ -178,7 +180,6 @@ class EmojiSearchActivity : ComponentActivity() {
                             if (imeVisible && firstSearchDone && isAlphaKeyboard()) {
                                 Log.d(TAG, "IME opened in onGloballyPositioned")
                                 imeOpened = true
-                                Handler(this@EmojiSearchActivity.mainLooper).removeCallbacks(closer)
                             }
                             heightPx = it.size.height
                             heightDp = with(localDensity) { it.size.height.toDp() }
@@ -264,7 +265,11 @@ class EmojiSearchActivity : ComponentActivity() {
                                 )
                             }
                         }
-                        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+                        // Publish the measured height before opening the input connection. Starting
+                        // with height 0 and then changing IME options restarts the keyboard.
+                        LaunchedEffect(heightPx > 0) {
+                            if (heightPx > 0) focusRequester.requestFocus()
+                        }
                     }
                 }
             }
@@ -307,7 +312,7 @@ class EmojiSearchActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        Handler(mainLooper).removeCallbacks(closer)
+        handler.removeCallbacks(closer)
         searchJob?.cancel()
         searchScope.cancel()
         super.onDestroy()
@@ -358,7 +363,9 @@ class EmojiSearchActivity : ComponentActivity() {
             colors.setBackground(this, ColorType.MAIN_BACKGROUND)
         }
         layoutVersion++
-        KeyboardSwitcher.getInstance().setAlphabetKeyboard(ShiftMode.UNSHIFT)
+        // Update the state machine too: a view-only switch leaves EMOJI saved, so the
+        // search editor's input restart restores the palette and closes this activity.
+        KeyboardSwitcher.getInstance().resetKeyboardStateToAlphabet(0, null)
         Log.d(TAG, "init end")
     }
 
@@ -400,7 +407,7 @@ class EmojiSearchActivity : ComponentActivity() {
             emojiSearchAdapter.submit(emojis.toList())
             resultCount = emojis.size
             firstSearchDone = true
-            if (imeVisible && !imeOpened) {
+            if (imeVisible && !imeOpened && isAlphaKeyboard()) {
                 Log.d(TAG, "IME opened in search")
                 imeOpened = true
             }
