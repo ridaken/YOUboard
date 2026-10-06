@@ -256,6 +256,10 @@ public class SuggestedWords {
         public static final int KIND_RESUMED = 9;
         public static final int KIND_OOV_CORRECTION = 10; // Most probable string correction
         public static final int KIND_UNDO = 11; // Restores the original spelling of an autocorrection
+        public static final int KIND_ALWAYS_REPLACE = 12;
+        public static final int KIND_KEEP_LITERAL = 13;
+        // Session identity for explicit replacement choices; dictionary suggestions never set it.
+        public int mAlwaysReplaceIdentity = -1;
 
         public static final int KIND_FLAG_POSSIBLY_OFFENSIVE = 0x80000000;
         public static final int KIND_FLAG_EXACT_MATCH = 0x40000000;

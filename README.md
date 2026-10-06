@@ -37,6 +37,7 @@ Does not use internet permission, and thus is 100% offline.
   <li>Customize keyboard <a href="https://github.com/HeliBorg/HeliBoard/blob/main/layouts.md">layouts</a> (only available when disabling <i>use system languages</i>)</li>
   <li>Customize special layouts, like symbols, number,  or functional key layout</li>
   <li>Multilingual typing</li>
+  <li>Always replace: explicit word and phrase rules with multiple inputs per replacement and a one-time literal override</li>
   <li>Glide typing (<i>only with closed source library</i> ☹️)</li>
   <ul>
     <li>library not included in the app, as there is no compatible open source library available</li>
@@ -50,6 +51,8 @@ Does not use internet permission, and thus is 100% offline.
 </ul>
 
 For [FAQ](https://github.com/HeliBorg/HeliBoard/wiki/FAQ), [hidden features](https://github.com/HeliBorg/HeliBoard/wiki/9.-Hidden-features) and more information about the app and features, please visit the [wiki](https://github.com/HeliBorg/HeliBoard/wiki)
+
+**Always replace** is available under **Settings → Text correction**. Add a replacement and one or more inputs, such as `ypu` and `yuo` → `you`. Rules work independently of ordinary autocorrect. The replacement uses its saved capitalization; **Respect capitalization** controls whether input casing must match exactly. Space, terminating punctuation, and keyboard actions such as Send apply a completed rule. Selecting the original text in suggestions keeps that occurrence unchanged. Rules also support phrases and decoded swipe words, and are included in settings backups. Password, number, URL/email, and app-declared no-suggestion fields are excluded; pasted and existing text are not expanded.
 
 # Contributing ❤
 

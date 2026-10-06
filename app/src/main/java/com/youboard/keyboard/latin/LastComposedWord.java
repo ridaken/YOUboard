@@ -46,6 +46,7 @@ public final class LastComposedWord {
             new InputPointers(DecoderSpecificConstants.DICTIONARY_MAX_WORD_LENGTH);
 
     private boolean mActive;
+    public boolean mIsAlwaysReplace;
 
     public static final LastComposedWord NOT_A_COMPOSED_WORD =
             new LastComposedWord(new ArrayList<Event>(), null, "", "",

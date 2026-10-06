@@ -244,6 +244,24 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         toolbarExpandKey.scaleX = (if (toolbarVisible) -1f else 1f) * direction
     }
 
+    private var explicitChoicesVisible = false
+    private var previousStripVisibility = VISIBLE
+    private var previousToolbarVisibility = false
+
+    fun setAlwaysReplaceVisible(show: Boolean) {
+        if (show == explicitChoicesVisible) return
+        explicitChoicesVisible = show
+        if (show) {
+            previousStripVisibility = visibility
+            previousToolbarVisibility = toolbarContainer.isVisible
+            visibility = VISIBLE
+            setToolbarVisibility(false)
+        } else {
+            visibility = previousStripVisibility
+            setToolbarVisibility(previousToolbarVisibility)
+        }
+    }
+
     fun setSuggestions(suggestions: SuggestedWords, isRtlLanguage: Boolean) {
         clear()
         setRtl(isRtlLanguage)
