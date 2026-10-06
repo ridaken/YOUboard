@@ -87,6 +87,9 @@ fun SettingsNavHost(
         composable(SettingsDestination.TextCorrection) {
             TextCorrectionScreen(onClickBack = ::goBack)
         }
+        composable(SettingsDestination.AlwaysReplace) {
+            com.youboard.keyboard.settings.screens.AlwaysReplaceScreen(onClickBack = ::goBack)
+        }
         composable(SettingsDestination.Preferences) {
             PreferencesScreen(onClickBack = ::goBack)
         }
@@ -148,6 +151,7 @@ object SettingsDestination {
     const val Settings = "settings"
     const val About = "about"
     const val TextCorrection = "text_correction"
+    const val AlwaysReplace = "always_replace"
     const val Preferences = "preferences"
     const val Toolbar = "toolbar"
     const val GestureTyping = "gesture_typing"
