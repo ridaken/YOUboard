@@ -4,6 +4,9 @@ package com.youboard.keyboard.latin.settings
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.youboard.keyboard.latin.utils.FoldableUtils
+import com.youboard.keyboard.latin.utils.Diagnostics
+import com.youboard.keyboard.latin.utils.DiagnosticEvent
+import com.youboard.keyboard.latin.utils.DiagnosticReason
 
 /** Missing preferences follow the device; existing booleans remain explicit user choices. */
 object SplitKeyboardSettings {
@@ -24,11 +27,15 @@ object SplitKeyboardSettings {
         else -> Mode.STANDARD
     }
 
-    fun write(prefs: SharedPreferences, key: String, mode: Mode) = prefs.edit {
-        when (mode) {
-            Mode.AUTOMATIC -> remove(key)
-            Mode.SPLIT -> putBoolean(key, true)
-            Mode.STANDARD -> putBoolean(key, false)
+    fun write(prefs: SharedPreferences, key: String, mode: Mode) {
+        Diagnostics.record(DiagnosticEvent.Mode(DiagnosticReason.MANUAL_SPLIT, mode == Mode.SPLIT,
+            key.endsWith("_landscape"), key.contains("_folded"), mode), FoldableUtils.snapshot.generation)
+        prefs.edit {
+            when (mode) {
+                Mode.AUTOMATIC -> remove(key)
+                Mode.SPLIT -> putBoolean(key, true)
+                Mode.STANDARD -> putBoolean(key, false)
+            }
         }
     }
 
@@ -53,6 +60,13 @@ object SplitKeyboardSettings {
     fun affectsGeometry(key: String?): Boolean = key == null ||
         key.startsWith(Settings.PREF_ENABLE_SPLIT_KEYBOARD) ||
         key.startsWith(Settings.PREF_SPLIT_SPACER_SCALE_PREFIX) ||
+        key.startsWith(Settings.PREF_KEYBOARD_HEIGHT_SCALE_PREFIX) ||
+        key.startsWith(Settings.PREF_BOTTOM_ROW_SCALE_PREFIX) ||
+        key.startsWith(Settings.PREF_BOTTOM_PADDING_SCALE_PREFIX) ||
+        key.startsWith(Settings.PREF_SIDE_PADDING_SCALE_PREFIX) ||
+        key.startsWith(Settings.PREF_KEY_GAP_SCALE_PREFIX) ||
+        key.startsWith("toolbar") || key == Settings.PREF_SHOW_NUMBER_ROW ||
+        key == Settings.PREF_SHOW_NUMBER_ROW_IN_SYMBOLS ||
         key.startsWith(Settings.PREF_ONE_HANDED_MODE_PREFIX) ||
         key.startsWith(Settings.PREF_FLOATING_ENABLED_PREFIX) ||
         key.startsWith(Settings.PREF_FLOATING_WIDTH_PREFIX) ||

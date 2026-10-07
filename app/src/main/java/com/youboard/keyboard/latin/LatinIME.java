@@ -78,6 +78,10 @@ import com.youboard.keyboard.latin.touchinputconsumer.GestureConsumer;
 import com.youboard.keyboard.latin.utils.ColorUtilKt;
 import com.youboard.keyboard.latin.utils.FloatingKeyboardUtils;
 import com.youboard.keyboard.latin.utils.FoldableUtils;
+import com.youboard.keyboard.latin.utils.KeyboardGeometrySignature;
+import com.youboard.keyboard.latin.utils.Diagnostics;
+import com.youboard.keyboard.latin.utils.DiagnosticEvent;
+import com.youboard.keyboard.latin.utils.DiagnosticReason;
 import com.youboard.keyboard.latin.utils.GestureDataGatheringKt;
 import com.youboard.keyboard.latin.utils.GestureDataGatheringSettings;
 import com.youboard.keyboard.latin.utils.InlineAutofillUtils;
@@ -169,9 +173,14 @@ public class LatinIME extends InputMethodService implements
     FoldableUtils.FoldableObserver foldableObserver;
     private final Handler mKeyboardEnvironmentHandler = new Handler(Looper.getMainLooper());
     private FoldableUtils.Snapshot mLastKeyboardEnvironment;
+    private boolean mGeometryPreferenceDirty;
+    private KeyboardGeometrySignature mLastSkippedGeometry;
     private final Runnable mRefreshKeyboardEnvironment = this::refreshKeyboardEnvironment;
     private final SharedPreferences.OnSharedPreferenceChangeListener mSplitPreferenceListener = (prefs, key) -> {
-        if (SplitKeyboardSettings.affectsGeometry(key)) requestKeyboardEnvironmentUpdate();
+        if (SplitKeyboardSettings.affectsGeometry(key)) {
+            mGeometryPreferenceDirty = true;
+            requestKeyboardEnvironmentUpdate();
+        }
     };
 
     private void requestKeyboardEnvironmentUpdate() {
@@ -187,25 +196,27 @@ public class LatinIME extends InputMethodService implements
         final MainKeyboardView view = mKeyboardSwitcher.getMainKeyboardView();
         if (view == null || view.getKeyboard() == null) return;
         final KeyboardId oldId = view.getKeyboard().mId;
+        final FoldableUtils.Snapshot environment = FoldableUtils.INSTANCE.getSnapshot();
+        if (!mGeometryPreferenceDirty && environment.equals(mLastKeyboardEnvironment)) return;
+        mGeometryPreferenceDirty = false;
         loadSettings();
         final SettingsValues values = mSettings.getCurrent();
-        final FoldableUtils.Snapshot environment = FoldableUtils.INSTANCE.getSnapshot();
-        boolean geometryChanged = !environment.equals(mLastKeyboardEnvironment)
-                || oldId.isSplitLayout() != values.mIsSplitKeyboardEnabled
-                || oldId.getSplitSpacerRelativeWidth() != values.mSplitKeyboardSpacerRelativeWidth
-                || oldId.getWidth() != ResourceUtils.getKeyboardWidth(this, values)
-                || oldId.getHeight() != ResourceUtils.getKeyboardHeight(getResources(), values);
+        final KeyboardGeometrySignature geometry = KeyboardGeometrySignature.create(this, values);
+        boolean geometryChanged = !geometry.equals(oldId.getGeometrySignature());
         mLastKeyboardEnvironment = environment;
         if (geometryChanged) {
-            view.cancelAllOngoingEvents();
-            mInputLogic.onKeyboardGeometryChanged();
-            // Other posture-specific dimensions (padding, key gaps) may change at the same width.
-            KeyboardLayoutSet.Companion.onKeyboardThemeChanged();
-            mKeyboardSwitcher.saveKeyboardState();
+            mLastSkippedGeometry = null;
             mKeyboardSwitcher.reloadKeyboard();
             mGestureConsumer = GestureConsumer.newInstance(getCurrentInputEditorInfo(),
                     mInputLogic.getPrivateCommandPerformer(), mRichImm.getCurrentSubtypeLocale(),
                     mKeyboardSwitcher.getKeyboard());
+        } else if (!geometry.equals(mLastSkippedGeometry)) {
+            mLastSkippedGeometry = geometry;
+            Diagnostics.record(new DiagnosticEvent.Geometry(DiagnosticReason.GEOMETRY_SKIPPED,
+                    oldId.getGeometrySignature(), geometry, FoldableUtils.INSTANCE.isFolded(),
+                    environment.getCanAutomaticallySplit(), SplitKeyboardSettings.mode(KtxKt.prefs(this),
+                            SplitKeyboardSettings.key(values.mDisplayOrientation == Configuration.ORIENTATION_LANDSCAPE,
+                                    FoldableUtils.INSTANCE.isFolded()))), environment.getGeneration());
         }
         if (mSuggestionStripView != null) ToolbarUtilsKt.refreshToolbarButtons(mSuggestionStripView);
     }
@@ -604,6 +615,7 @@ public class LatinIME extends InputMethodService implements
         mDisplayContext = KtxKt.getDisplayContext(this);
         KeyboardSwitcher.init(this);
         super.onCreate();
+        Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.IME_CREATE));
 
         foldableObserver = new FoldableUtils.FoldableObserver(this, this::requestKeyboardEnvironmentUpdate);
         loadSettings();
@@ -749,6 +761,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onDestroy() {
+        Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.IME_DESTROY));
         mKeyboardEnvironmentHandler.removeCallbacksAndMessages(null);
         KtxKt.prefs(this).unregisterOnSharedPreferenceChangeListener(mSplitPreferenceListener);
         mClipboardHistoryManager.onDestroy();
@@ -775,6 +788,7 @@ public class LatinIME extends InputMethodService implements
     public void onConfigurationChanged(final Configuration conf) {
         SettingsValues settingsValues = mSettings.getCurrent();
         Log.i(TAG, "onConfigurationChanged");
+        Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.CONFIGURATION));
         SubtypeSettings.INSTANCE.reloadSystemLocales(this);
         if (settingsValues.mDisplayOrientation != conf.orientation) {
             mHandler.startOrientationChanging();
@@ -800,6 +814,7 @@ public class LatinIME extends InputMethodService implements
         super.onConfigurationChanged(conf);
         mDisplayContext = KtxKt.getDisplayContext(this);
         if (foldableObserver != null) foldableObserver.refresh();
+        mGeometryPreferenceDirty = true;
         requestKeyboardEnvironmentUpdate();
     }
 
@@ -916,6 +931,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     void onStartInputViewInternal(final EditorInfo editorInfo, final boolean restarting) {
+        Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.INPUT_SHOW));
         super.onStartInputView(editorInfo, restarting);
         if (foldableObserver != null) foldableObserver.refresh();
 
@@ -1029,10 +1045,16 @@ public class LatinIME extends InputMethodService implements
             needToCallLoadKeyboardLater = false;
         }
 
-        if (isDifferentTextField) {
-            mainKeyboardView.closing();
+        final Keyboard shownKeyboard = mainKeyboardView.getKeyboard();
+        final boolean geometryChanged = shownKeyboard == null || !KeyboardGeometrySignature.create(this,
+                currentSettingsValues).equals(shownKeyboard.mId.getGeometrySignature());
+        if (isDifferentTextField || geometryChanged) {
+            if (isDifferentTextField) mainKeyboardView.closing();
             suggest.setAutoCorrectionThreshold(currentSettingsValues.mAutoCorrectionThreshold);
             switcher.reloadMainKeyboard();
+            mGestureConsumer = GestureConsumer.newInstance(editorInfo,
+                    mInputLogic.getPrivateCommandPerformer(), mRichImm.getCurrentSubtypeLocale(),
+                    switcher.getKeyboard());
             if (needToCallLoadKeyboardLater) {
                 // If we need to call loadKeyboard again later, we need to save its state now. The
                 // later call will be done in #retryResetCaches.
@@ -1081,6 +1103,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onWindowHidden() {
+        Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.INPUT_HIDE));
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();

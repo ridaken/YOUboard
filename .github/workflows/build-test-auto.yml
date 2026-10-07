@@ -11,6 +11,11 @@ on:
   pull_request:
     paths:
       - 'app/src/main/java**'
+      - 'app/src/test/**'
+      - 'app/src/main/res/**'
+      - 'app/src/main/AndroidManifest.xml'
+      - 'app/*.gradle.kts'
+      - '.github/workflows/build-test-auto.yml'
   workflow_dispatch:
 
 jobs:

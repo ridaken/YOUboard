@@ -28,6 +28,7 @@ import com.youboard.keyboard.latin.common.Links
 import com.youboard.keyboard.latin.settings.DebugSettings
 import com.youboard.keyboard.latin.settings.Defaults
 import com.youboard.keyboard.latin.utils.Log
+import com.youboard.keyboard.latin.utils.Diagnostics
 import com.youboard.keyboard.latin.utils.SpannableStringUtils
 import com.youboard.keyboard.latin.utils.getActivity
 import com.youboard.keyboard.latin.utils.prefs
@@ -41,6 +42,7 @@ import com.youboard.keyboard.latin.utils.Theme
 import com.youboard.keyboard.latin.utils.previewDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import androidx.core.content.edit
@@ -59,6 +61,7 @@ fun AboutScreen(
         SettingsWithoutKey.COMMUNITY_LINKS,
         SettingsWithoutKey.GITHUB,
         SettingsWithoutKey.SAVE_LOG,
+        SettingsWithoutKey.CLEAR_DIAGNOSTICS,
     )
     SearchSettingsScreen(
         onClickBack = onClickBack,
@@ -181,12 +184,20 @@ fun createAboutSettings(context: Context) = listOf(
             if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
             val uri = result.data?.data ?: return@rememberLauncherForActivityResult
             scope.launch(Dispatchers.IO) {
-                ctx.getActivity()?.contentResolver?.openOutputStream(uri)?.use { os ->
-                    os.writer().use { writer ->
-                        val logcat = Runtime.getRuntime().exec("logcat -d -b all *:W").inputStream.use { it.reader().readText() }
-                        val internal = Log.getLog().joinToString("\n")
-                        writer.write(logcat + "\n\n" + internal)
+                try {
+                    checkNotNull(ctx.contentResolver.openOutputStream(uri)).use { os ->
+                        os.writer().use { writer ->
+                            writer.write("YOUBoard ${BuildConfig.VERSION_NAME}; ${android.os.Build.BRAND} ${android.os.Build.MODEL}; Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})\n\n")
+                            writer.write(Diagnostics.export())
+                            val logcat = runCatching {
+                                Runtime.getRuntime().exec("logcat -d -b all *:W").inputStream.use { it.reader().readText() }
+                            }.getOrElse { "Logcat unavailable: ${it.javaClass.simpleName}" }
+                            writer.write("\n\nCurrent in-memory log:\n" + Log.getLog().joinToString("\n"))
+                            writer.write("\n\nAccessible logcat warnings/errors:\n$logcat")
+                        }
                     }
+                } catch (_: Exception) {
+                    withContext(Dispatchers.Main) { Toast.makeText(ctx, R.string.diagnostic_export_failed, Toast.LENGTH_LONG).show() }
                 }
             }
         }
@@ -207,6 +218,24 @@ fun createAboutSettings(context: Context) = listOf(
             },
             icon = R.drawable.ic_settings_about_log
         )
+    },
+    Setting(context, SettingsWithoutKey.CLEAR_DIAGNOSTICS, R.string.clear_diagnostics, R.string.diagnostic_retention_summary) { setting ->
+        val ctx = LocalContext.current
+        val scope = rememberCoroutineScope()
+        Preference(name = setting.title, description = setting.description, onClick = {
+            AlertDialog.Builder(ctx)
+                .setTitle(R.string.clear_diagnostics)
+                .setMessage(R.string.clear_diagnostics_confirmation)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.clear_diagnostics) { _, _ ->
+                    scope.launch(Dispatchers.IO) {
+                        val cleared = runCatching { Diagnostics.clear() }.isSuccess
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(ctx, if (cleared) R.string.diagnostics_cleared else R.string.diagnostic_clear_failed, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.show()
+        })
     },
 )
 

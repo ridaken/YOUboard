@@ -13,6 +13,7 @@ import com.youboard.keyboard.latin.settings.DebugSettings
 import com.youboard.keyboard.latin.settings.Defaults
 import com.youboard.keyboard.latin.utils.DeviceProtectedUtils
 import com.youboard.keyboard.latin.utils.Log
+import com.youboard.keyboard.latin.utils.Diagnostics
 import com.youboard.keyboard.latin.utils.prefs
 import java.io.File
 import java.io.PrintWriter
@@ -57,6 +58,8 @@ Stack trace:
 $stackTrace
 Last log:
 ${Log.getLog(100).joinToString("\n")}
+Recent diagnostics:
+${Diagnostics.recent()}
 """)
         defaultUncaughtExceptionHandler!!.uncaughtException(t, e)
     }

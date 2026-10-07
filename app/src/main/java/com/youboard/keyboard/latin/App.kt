@@ -10,6 +10,7 @@ import com.youboard.keyboard.latin.settings.Settings
 import com.youboard.keyboard.latin.utils.FoldableUtils
 import com.youboard.keyboard.latin.utils.LayoutUtilsCustom
 import com.youboard.keyboard.latin.utils.Log
+import com.youboard.keyboard.latin.utils.Diagnostics
 import com.youboard.keyboard.latin.utils.SubtypeSettings
 import com.youboard.keyboard.latin.utils.prefs
 import com.youboard.keyboard.latin.utils.upgradeToolbarPrefs
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        Diagnostics.init(this)
         DebugFlags.init(this)
         FoldableUtils.init(this)
         Settings.init(this)
