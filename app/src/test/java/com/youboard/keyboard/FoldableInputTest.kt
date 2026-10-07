@@ -37,8 +37,13 @@ class FoldableInputTest {
     private lateinit var ime: LatinIME
     private val switcher get() = KeyboardSwitcher.getInstance()
     private var eventTime = 100L
+    private val modelField = AdaptiveTouchModel::class.java.getDeclaredField("instance").apply { isAccessible = true }
+    private var previousModel: Any? = null
 
     @Before fun setup() {
+        // Robolectric shares this process singleton across otherwise separate app directories.
+        previousModel = modelField.get(null)
+        modelField.set(null, null)
         val app = RuntimeEnvironment.getApplication()
         resize(false)
         app.prefs().edit {
@@ -57,10 +62,14 @@ class FoldableInputTest {
     }
 
     @After fun destroy() {
-        ShadowInputMethodService.inputViewShown = true
-        controller.destroy()
-        AndroidSettings.Global.putString(ime.contentResolver, "display_features", null)
-        FoldableUtils.init(ime)
+        try {
+            ShadowInputMethodService.inputViewShown = true
+            controller.destroy()
+            AndroidSettings.Global.putString(ime.contentResolver, "display_features", null)
+            FoldableUtils.init(ime)
+        } finally {
+            modelField.set(null, previousModel)
+        }
     }
 
     private fun posture(open: Boolean) {
@@ -139,18 +148,11 @@ class FoldableInputTest {
             initialSelStart = ShadowInputMethodService.selectionStart
             initialSelEnd = ShadowInputMethodService.selectionEnd
         }
-        // Starting input initializes a process-wide model; do not leak its test app directory.
-        val modelField = AdaptiveTouchModel::class.java.getDeclaredField("instance").apply { isAccessible = true }
-        val previousModel = modelField.get(null)
-        try {
-            ime.onStartInputView(editorInfo, true)
-            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
-            assertFalse(switcher.keyboard!!.mId.isSplitLayout)
-            assertEquals(390, switcher.keyboard!!.mId.width)
-            assertEquals(text, ShadowInputMethodService.text)
-        } finally {
-            modelField.set(null, previousModel)
-        }
+        ime.onStartInputView(editorInfo, true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+        assertFalse(switcher.keyboard!!.mId.isSplitLayout)
+        assertEquals(390, switcher.keyboard!!.mId.width)
+        assertEquals(text, ShadowInputMethodService.text)
     }
 
     private fun tap(code: Int) {
