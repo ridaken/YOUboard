@@ -68,6 +68,7 @@ private fun createSettings(context: Context) = createAboutSettings(context) + cr
         if (JniUtils.sHaveGestureLib) createGestureTypingSettings(context) else emptyList()
 
 object SettingsWithoutKey {
+    const val ALWAYS_REPLACE = "always_replace"
     const val EDIT_PERSONAL_DICTIONARY = "edit_personal_dictionary"
     const val RESET_ADAPTIVE_TOUCH = "reset_adaptive_touch"
     const val APP = "app"

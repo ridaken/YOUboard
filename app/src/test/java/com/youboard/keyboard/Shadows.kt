@@ -135,6 +135,8 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
         var composingEnd = -1
         var currentInputType = InputType.TYPE_CLASS_TEXT
         var currentImeOptions = 0
+        var lastEditorAction = 0
+        var unavailableEditorText = false
 
         // convenience for access
         val textBeforeCursor get() = text.substring(0, selectionStart)
@@ -156,6 +158,8 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
             composingEnd = -1
             currentInputType = InputType.TYPE_CLASS_TEXT
             currentImeOptions = 0
+            lastEditorAction = 0
+            unavailableEditorText = false
         }
     }
 
@@ -173,7 +177,7 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
     private val ic = object : InputConnection {
         // pretty clear (though this may be slow depending on the editor)
         // bad return value here is likely the cause for that weird bug improved/fixed by fixIncorrectLength
-        override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence = textBeforeCursor.take(p0)
+        override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence = textBeforeCursor.takeLast(p0)
         // pretty clear (though this may be slow depending on the editor)
         override fun getTextAfterCursor(p0: Int, p1: Int): CharSequence = textAfterCursor.take(p0)
         // pretty clear
@@ -308,7 +312,8 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
             return true
         }
         // implementation is only to work with getTextBeforeCursorAndDetectLaggyConnection
-        override fun getExtractedText(p0: ExtractedTextRequest?, p1: Int): ExtractedText {
+        override fun getExtractedText(p0: ExtractedTextRequest?, p1: Int): ExtractedText? {
+            if (unavailableEditorText) return null
             return ExtractedText().also {
                 it.startOffset = 0
                 it.selectionStart = selectionStart
@@ -321,7 +326,10 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
         override fun getCursorCapsMode(p0: Int): Int = TODO("Not yet implemented")
         override fun deleteSurroundingTextInCodePoints(p0: Int, p1: Int): Boolean = TODO("Not yet implemented")
         override fun commitCompletion(p0: CompletionInfo?): Boolean = TODO("Not yet implemented")
-        override fun performEditorAction(p0: Int): Boolean = TODO("Not yet implemented")
+        override fun performEditorAction(p0: Int): Boolean {
+            lastEditorAction = p0
+            return true
+        }
         override fun performContextMenuAction(p0: Int): Boolean = TODO("Not yet implemented")
         override fun clearMetaKeyStates(p0: Int): Boolean = TODO("Not yet implemented")
         override fun reportFullscreenMode(p0: Boolean): Boolean = TODO("Not yet implemented")

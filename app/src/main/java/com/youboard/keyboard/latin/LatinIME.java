@@ -150,6 +150,7 @@ public class LatinIME extends InputMethodService implements
     private View mInputView;
     private InsetsOutlineProvider mInsetsUpdater;
     private SuggestionStripView mSuggestionStripView;
+    private boolean mAlwaysReplaceStripVisible;
 
     private RichInputMethodManager mRichImm;
     final KeyboardSwitcher mKeyboardSwitcher;
@@ -845,7 +846,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     public void updateSuggestionStripView(View view) {
-        mSuggestionStripView = mSettings.getCurrent().mToolbarMode == ToolbarMode.HIDDEN || isEmojiSearch()?
+        mSuggestionStripView = (!mAlwaysReplaceStripVisible && mSettings.getCurrent().mToolbarMode == ToolbarMode.HIDDEN) || isEmojiSearch()?
                         null : view.findViewById(R.id.suggestion_strip_view);
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setRtl(mRichImm.getCurrentSubtype().isRtlSubtype());
@@ -1569,9 +1570,26 @@ public class LatinIME extends InputMethodService implements
         return null != mSuggestionStripView;
     }
 
+    public void setAlwaysReplaceStripVisible(final boolean show) {
+        if (mAlwaysReplaceStripVisible == show) return;
+        if (!show && mSuggestionStripView != null) mSuggestionStripView.setAlwaysReplaceVisible(false);
+        mAlwaysReplaceStripVisible = show;
+        if (mInputView == null) return;
+        updateSuggestionStripView(mInputView);
+        if (mSettings.getCurrent().mToolbarMode == ToolbarMode.HIDDEN) {
+            final View strip = mInputView.findViewById(R.id.suggestion_strip_view);
+            final View container = mInputView.findViewById(R.id.strip_container);
+            if (strip != null) strip.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (container != null) container.setVisibility(show ? View.VISIBLE : View.GONE);
+        }
+    }
+
     private void setSuggestedWords(final SuggestedWords suggestedWords) {
         final SettingsValues currentSettingsValues = mSettings.getCurrent();
         mInputLogic.setSuggestedWords(suggestedWords);
+        final boolean explicitChoices = InputLogic.hasAlwaysReplaceChoices(suggestedWords)
+                || hasExplicitReplacementUndo(suggestedWords);
+        setAlwaysReplaceStripVisible(explicitChoices);
         // TODO: Modify this when we support suggestions with hard keyboard
         if (!hasSuggestionStripView()) {
             return;
@@ -1580,6 +1598,8 @@ public class LatinIME extends InputMethodService implements
             return;
         }
 
+        mSuggestionStripView.setAlwaysReplaceVisible(explicitChoices);
+
         final boolean isEmptyApplicationSpecifiedCompletions =
                 currentSettingsValues.mInputAttributes.mApplicationSpecifiedCompletionOn
                         && suggestedWords.isEmpty();
@@ -1587,7 +1607,7 @@ public class LatinIME extends InputMethodService implements
                 || suggestedWords.isPunctuationSuggestions()
                 || isEmptyApplicationSpecifiedCompletions;
 
-        if (currentSettingsValues.mSuggestionsEnabled
+        if (explicitChoices || currentSettingsValues.mSuggestionsEnabled
                 || currentSettingsValues.mInputAttributes.mApplicationSpecifiedCompletionOn
                 // We should clear the contextual strip if there is no suggestion from dictionaries.
                 || noSuggestionsFromDictionaries) {
@@ -1656,6 +1676,12 @@ public class LatinIME extends InputMethodService implements
     // and there is a selection of text or it's the start of a line.
     @Override
     public void setNeutralSuggestionStrip() {
+        final SuggestedWords explicit = mInputLogic.getAlwaysReplaceSuggestions();
+        if (explicit != null) {
+            setSuggestedWords(explicit);
+            return;
+        }
+        setAlwaysReplaceStripVisible(false);
         final SettingsValues currentSettings = mSettings.getCurrent();
         if (tryShowClipboardSuggestion()) {
             // clipboard suggestion has been set
@@ -1680,6 +1706,14 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void removeSuggestion(final String word) {
         mDictionaryFacilitator.removeWord(word);
+    }
+
+    private boolean hasExplicitReplacementUndo(final SuggestedWords words) {
+        if (!mInputLogic.mLastComposedWord.mIsAlwaysReplace) return false;
+        for (int i = 0; i < words.size(); i++) {
+            if (words.getInfo(i).isKindOf(SuggestedWordInfo.KIND_UNDO)) return true;
+        }
+        return false;
     }
 
     @Override

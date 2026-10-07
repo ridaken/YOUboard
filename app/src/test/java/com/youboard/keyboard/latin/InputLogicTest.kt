@@ -766,6 +766,310 @@ class InputLogicTest {
     // ------- helper functions ---------
 
     // should be called before every test, so the same state is guaranteed
+    private fun alwaysReplace(vararg triggers: String, replacement: String = "you", respectCase: Boolean = false) {
+        latinIME.prefs().edit {
+            putBoolean(Settings.PREF_AUTO_CORRECTION, false)
+            putBoolean(Settings.PREF_SHOW_SUGGESTIONS, false)
+        }
+        AlwaysReplaceStore.save(latinIME.prefs(), listOf(
+            AlwaysReplaceRule("test", replacement, triggers.toList(), respectCase)))
+        setText("")
+    }
+
+    private fun typeAlwaysReplace(value: String) {
+        value.codePoints().forEach { latinIME.onEvent(Event.createEventForCodePointFromUnknownSource(it)); handleMessages() }
+        checkConnectionConsistency()
+    }
+
+    private fun chooseAlwaysReplace(kind: Int) {
+        val suggestions = inputLogic.getAlwaysReplaceSuggestions()!!
+        val info = (0 until suggestions.size()).map { suggestions.getInfo(it) }.first { it.isKindOf(kind) }
+        latinIME.pickSuggestionManually(info)
+        handleMessages()
+        checkConnectionConsistency()
+    }
+
+    @Test fun `Always replace works independently of autocorrect suggestions and a main dictionary`() {
+        alwaysReplace("ypu", "yuo", "yoi")
+        typeAlwaysReplace("Ypu yuo yoi ")
+        assertEquals("you you you ", text)
+    }
+
+    @Test fun `Always replace respects exact casing and preserves saved replacement casing`() {
+        alwaysReplace("ypu", replacement = "You", respectCase = true)
+        typeAlwaysReplace("Ypu ypu ")
+        assertEquals("Ypu You ", text)
+    }
+
+    @Test fun `Always replace literal override preserves only one occurrence`() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("Ypu")
+        chooseAlwaysReplace(SuggestedWordInfo.KIND_KEEP_LITERAL)
+        typeAlwaysReplace("ypu ")
+        assertEquals("Ypu you ", text)
+    }
+
+    @Test fun `Always replace phrase choices replace the entire matched range`() {
+        alwaysReplace("teh cat", replacement = "the kitten")
+        typeAlwaysReplace("hi teh cat")
+        assertEquals("teh cat", inputLogic.getAlwaysReplaceSuggestions()!!.getWord(2))
+        chooseAlwaysReplace(SuggestedWordInfo.KIND_ALWAYS_REPLACE)
+        assertEquals("hi the kitten", text)
+    }
+
+    @Test fun `Always replace phrase literal remains unchanged and later phrases still replace`() {
+        alwaysReplace("teh cat", replacement = "kitten")
+        typeAlwaysReplace("teh cat")
+        chooseAlwaysReplace(SuggestedWordInfo.KIND_KEEP_LITERAL)
+        typeAlwaysReplace("teh cat ")
+        assertEquals("teh cat kitten ", text)
+    }
+
+    @Test fun `Always replace punctuation and newline keep their entered boundaries`() {
+        alwaysReplace("ypu")
+        currentImeOptions = EditorInfo.IME_ACTION_NONE
+        setText("")
+        typeAlwaysReplace("ypu, ypu\n")
+        assertEquals("you, you\n", text)
+    }
+
+    @Test fun `Always replace keyboard Send commits before the editor action`() {
+        alwaysReplace("ypu")
+        currentImeOptions = EditorInfo.IME_ACTION_SEND
+        setText("")
+        typeAlwaysReplace("ypu\n")
+        assertEquals("you", text)
+        assertEquals(EditorInfo.IME_ACTION_SEND, ShadowInputMethodService.lastEditorAction)
+    }
+
+    @Test fun `Always replace swipe preview stays literal until a boundary`() {
+        alwaysReplace("hello", replacement = "hi")
+        glideTypingInput("hello")
+        handleMessages()
+        assertEquals("hello", text)
+        typeAlwaysReplace(" ")
+        assertEquals("hi ", text)
+    }
+
+    @Test fun `Always replace phrase supports mixed tap and swipe input`() {
+        alwaysReplace("teh cat", replacement = "kitten")
+        typeAlwaysReplace("teh ")
+        glideTypingInput("cat")
+        handleMessages()
+        typeAlwaysReplace(" ")
+        assertEquals("kitten ", text)
+    }
+
+    @Test fun `Always replace backspace undoes the whole phrase without weakening the rule`() {
+        alwaysReplace("teh cat", replacement = "kitten")
+        latinIME.prefs().edit { putBoolean(Settings.PREF_BACKSPACE_REVERTS_AUTOCORRECT, true) }
+        setText("")
+        typeAlwaysReplace("teh cat ")
+        assertEquals("kitten ", text)
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals("teh cat", text)
+        typeAlwaysReplace("teh cat ")
+        assertEquals("teh cat kitten ", text)
+    }
+
+    @Test fun `Always replace undo suggestion restores the entire phrase`() {
+        alwaysReplace("teh cat", replacement = "kitten")
+        typeAlwaysReplace("teh cat ")
+        val suggestions = inputLogic.decorateWithUndoSuggestion(SuggestedWords.getEmptyInstance())
+        val undo = suggestions.getInfo(0)
+        assertEquals("teh cat", undo.mWord)
+        assertTrue(undo.isKindOf(SuggestedWordInfo.KIND_UNDO))
+        latinIME.pickSuggestionManually(undo)
+        handleMessages()
+        assertEquals("teh cat", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun `Always replace does not recurse through replacement output`() {
+        alwaysReplace("ypu")
+        AlwaysReplaceStore.save(latinIME.prefs(), listOf(
+            AlwaysReplaceRule("first", "you", listOf("ypu")),
+            AlwaysReplaceRule("second", "them", listOf("you"))))
+        setText("")
+        typeAlwaysReplace("ypu you ")
+        assertEquals("you them ", text)
+    }
+
+    @Test fun `Always replace ignores clipboard existing text and excluded fields`() {
+        alwaysReplace("ypu")
+        latinIME.onTextInput("ypu")
+        handleMessages()
+        typeAlwaysReplace(" ")
+        assertEquals("ypu ", text)
+        setText("ypu")
+        typeAlwaysReplace(" ")
+        assertEquals("ypu ", text)
+        for (inputType in listOf(InputType.TYPE_CLASS_NUMBER,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)) {
+            currentInputType = inputType
+            setText("")
+            typeAlwaysReplace("ypu ")
+            assertEquals("ypu ", text)
+        }
+    }
+
+    @Test fun `Always replace invalidates pending choices on cursor movement and rule changes`() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("ypu")
+        val stale = inputLogic.getAlwaysReplaceSuggestions()!!.getInfo(1)
+        setCursorPosition(0)
+        latinIME.pickSuggestionManually(stale)
+        handleMessages()
+        assertEquals("ypu", text)
+        setText("")
+        typeAlwaysReplace("ypu")
+        latinIME.prefs().edit { putBoolean(AlwaysReplaceStore.ENABLED_KEY, false) }
+        typeAlwaysReplace(" ")
+        assertEquals("ypu ", text)
+    }
+
+    @Test fun `Always replace original stays available despite late dictionary suggestions`() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("ypu")
+        latinIME.setSuggestions(SuggestedWords.getEmptyInstance())
+        handleMessages()
+        assertEquals("you", inputLogic.mSuggestedWords.getWord(1))
+        assertEquals("ypu", inputLogic.mSuggestedWords.getWord(2))
+    }
+
+    @Test fun `Always replace bypasses valid-word protection and learned rejection`() {
+        alwaysReplace("on", replacement = "in")
+        latinIME.prefs().edit {
+            putBoolean(Settings.PREF_AUTO_CORRECTION, true)
+            putBoolean(Settings.PREF_SHOW_SUGGESTIONS, true)
+        }
+        setText("")
+        val field = InputLogic::class.java.getDeclaredField("mCorrectionFeedbackStore").apply { isAccessible = true }
+        (field.get(inputLogic) as CorrectionFeedbackStore).recordRejection(Locale.ENGLISH, null, "on", "in")
+        typeAlwaysReplace("on ")
+        assertEquals("in ", text)
+    }
+
+    @Test fun `Always replace phrase prefix survives a confident ordinary autocorrection`() {
+        alwaysReplace("teh cat", replacement = "kitten")
+        latinIME.prefs().edit {
+            putBoolean(Settings.PREF_AUTO_CORRECTION, true)
+            putBoolean(Settings.PREF_SHOW_SUGGESTIONS, true)
+        }
+        setText("")
+        typeAlwaysReplace("teh")
+        val typed = SuggestedWordInfo("teh", "", 0, SuggestedWordInfo.KIND_TYPED,
+            com.youboard.keyboard.latin.dictionary.Dictionary.DICTIONARY_USER_TYPED, -1, -1)
+        val correction = SuggestedWordInfo("the", "", 100, SuggestedWordInfo.KIND_CORRECTION,
+            com.youboard.keyboard.latin.dictionary.Dictionary.DICTIONARY_USER_TYPED, -1, -1)
+        inputLogic.setSuggestedWords(SuggestedWords(arrayListOf(typed, correction), null, typed,
+            false, true, false, SuggestedWords.INPUT_STYLE_TYPING, 0))
+        typeAlwaysReplace(" cat ")
+        assertEquals("kitten ", text)
+    }
+
+    @Test fun `Always replace treats internal punctuation and digits as literal trigger characters`() {
+        alwaysReplace("a.b", "a1", "YpU", "a  b", "hello . world")
+        typeAlwaysReplace("a.b a1 YpU a  b hello . world ")
+        assertEquals("you you you you you ", text)
+    }
+
+    @Test fun `Always replace remains active in incognito and updates rules immediately`() {
+        alwaysReplace("ypu")
+        latinIME.prefs().edit { putBoolean(Settings.PREF_ALWAYS_INCOGNITO_MODE, true) }
+        setText("")
+        typeAlwaysReplace("ypu ")
+        assertEquals("you ", text)
+        AlwaysReplaceStore.save(latinIME.prefs(), listOf(AlwaysReplaceRule("updated", "them", listOf("ypu"))))
+        typeAlwaysReplace("ypu ")
+        assertEquals("you them ", text)
+    }
+
+    @Test fun `Always replace never matches part of an existing word after the cursor`() {
+        alwaysReplace("ypu")
+        setText("suffix")
+        setCursorPosition(0)
+        typeAlwaysReplace("ypu")
+        assertEquals("ypusuffix", text)
+        assertEquals(null, inputLogic.getAlwaysReplaceSuggestions())
+    }
+
+    @Test fun `Always replace discards stale explicit previews after a literal pick`() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("ypu")
+        val stale = inputLogic.getAlwaysReplaceSuggestions()!!
+        chooseAlwaysReplace(SuggestedWordInfo.KIND_KEEP_LITERAL)
+        latinIME.setSuggestions(stale)
+        handleMessages()
+        assertFalse(InputLogic.hasAlwaysReplaceChoices(inputLogic.mSuggestedWords))
+        assertEquals("ypu", text)
+    }
+
+    @Test fun `Always replace verifies the actual editor selection before a manual commit`() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("ypu")
+        val stale = inputLogic.getAlwaysReplaceSuggestions()!!.getInfo(1)
+        // Move the host selection without an IME callback, as can happen with delayed updates.
+        ShadowInputMethodService.text = "ypu ypu"
+        selectionStart = 7
+        selectionEnd = 7
+        latinIME.pickSuggestionManually(stale)
+        handleMessages()
+        assertEquals("ypu ypu", text)
+    }
+
+    @Test fun `Always replace temporarily reveals a completely hidden strip and restores it`() {
+        alwaysReplace("ypu")
+        latinIME.prefs().edit { putString(Settings.PREF_TOOLBAR_MODE, "HIDDEN") }
+        setText("")
+        val context = android.view.ContextThemeWrapper(latinIME,
+            com.youboard.keyboard.keyboard.KeyboardTheme.getKeyboardTheme(latinIME).mStyleId)
+        val strip = com.youboard.keyboard.latin.suggestions.SuggestionStripView(context, null)
+        strip.id = R.id.suggestion_strip_view
+        strip.visibility = android.view.View.GONE
+        val container = android.widget.FrameLayout(context).apply {
+            id = R.id.strip_container
+            visibility = android.view.View.GONE
+            addView(strip)
+        }
+        val root = android.widget.FrameLayout(context).apply {
+            addView(container)
+            addView(MainKeyboardView(context, null).apply { id = R.id.keyboard_view })
+        }
+        latinIME.setInputView(root)
+        assertFalse(latinIME.hasSuggestionStripView())
+        typeAlwaysReplace("ypu")
+        assertTrue(latinIME.hasSuggestionStripView())
+        assertEquals(android.view.View.VISIBLE, strip.visibility)
+        assertEquals(android.view.View.VISIBLE, container.visibility)
+        chooseAlwaysReplace(SuggestedWordInfo.KIND_KEEP_LITERAL)
+        assertFalse(latinIME.hasSuggestionStripView())
+        assertEquals(android.view.View.GONE, strip.visibility)
+        assertEquals(android.view.View.GONE, container.visibility)
+    }
+
+    @Test fun `Always replace phrase supports consecutive swipe words`() {
+        alwaysReplace("new york", replacement = "NYC")
+        glideTypingInput("new")
+        handleMessages()
+        inputLogic.onStartBatchInput(settingsValues, KeyboardSwitcher.getInstance(), latinIME.mHandler)
+        glideTypingInput("york")
+        handleMessages()
+        typeAlwaysReplace(" ")
+        assertEquals("NYC ", text)
+    }
+
+    @Test fun `Always replace safely abandons a commit when the editor cannot verify selection`() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("ypu")
+        ShadowInputMethodService.unavailableEditorText = true
+        chooseAlwaysReplace(SuggestedWordInfo.KIND_ALWAYS_REPLACE)
+        assertEquals("ypu", text)
+    }
+
     @BeforeTest
     fun reset() {
         // reset input connection & facilitator

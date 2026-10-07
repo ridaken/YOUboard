@@ -148,6 +148,24 @@
     <!-- Option to change the confidence level of the auto correction -->
     <string name="auto_correction_confidence">Auto-correction confidence</string>
     <!-- Option to enable auto correction for shortcuts (will correct shortcut to the actual word) -->
+    <string name="always_replace">Always replace</string>
+    <string name="always_replace_enable">Enable Always replace</string>
+    <string name="always_replace_summary">Replace matching words and phrases when you press space, punctuation, or a keyboard action. Select the original text in suggestions to keep it once.</string>
+    <string name="always_replace_add_rule">Add rule</string>
+    <string name="always_replace_with">Replace with</string>
+    <string name="always_replace_when">When I type</string>
+    <string name="always_replace_add_input">Add input</string>
+    <string name="always_replace_remove_input">Remove</string>
+    <string name="always_replace_respect_case">Respect capitalization</string>
+    <string name="always_replace_case_summary">Respect capitalization requires the exact input casing. The replacement always uses its saved capitalization.</string>
+    <string name="always_replace_rule_enabled">Rule enabled</string>
+    <string name="always_replace_disabled">Disabled</string>
+    <string name="always_replace_data_error">Saved rules could not be read. Always replace is inactive. Reset the rules to start again.</string>
+    <string name="always_replace_reset">Reset rules</string>
+    <string name="always_replace_empty_error">Enter a replacement and at least one nonempty input.</string>
+    <string name="always_replace_multiline_error">Inputs and replacements must fit on one line.</string>
+    <string name="always_replace_noop_error">An input must differ from its replacement.</string>
+    <string name="always_replace_conflict_error">Input “%1$s” conflicts with “%2$s”. Remove the duplicate or overlapping input.</string>
     <string name="auto_correct_shortcuts">Auto-correct shortcuts</string>
     <!-- Description for auto_correct_shortcuts -->
     <string name="auto_correct_shortcuts_summary">When enabled shortcuts might be expanded by autocorrect</string>

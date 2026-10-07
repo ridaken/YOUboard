@@ -21,6 +21,8 @@ import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.inputmethod.CorrectionInfo;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -35,6 +37,9 @@ import com.youboard.keyboard.keyboard.KeyboardLayoutSet;
 import com.youboard.keyboard.keyboard.KeyboardSwitcher;
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import com.youboard.keyboard.latin.CapsMode;
+import com.youboard.keyboard.latin.AlwaysReplaceSession;
+import com.youboard.keyboard.latin.AlwaysReplaceStore;
+import com.youboard.keyboard.latin.AlwaysReplaceMatcher;
 import com.youboard.keyboard.latin.CorrectionFeedbackStore;
 import com.youboard.keyboard.latin.dictionary.Dictionary;
 import com.youboard.keyboard.latin.DictionaryFacilitator;
@@ -106,6 +111,10 @@ public final class InputLogic {
     public Suggest mSuggest; // non-final for active gesture data gathering, revert when data gathering phase is done (end of 2026 latest)
     public DictionaryFacilitator mDictionaryFacilitator; // non-final for active gesture data gathering, revert when data gathering phase is done (end of 2026 latest)
     private final CorrectionFeedbackStore mCorrectionFeedbackStore;
+    private final AlwaysReplaceSession mAlwaysReplaceSession = new AlwaysReplaceSession();
+    private String mAlwaysReplaceConfiguration;
+    private boolean mAlwaysReplaceEnabled;
+    private boolean mSkipAlwaysReplaceObservation;
     private final AdaptiveTouchModel mAdaptiveTouchModel;
     private final AccuracyDiagnosticsRecorder mAccuracyDiagnosticsRecorder;
     private long mLastSuggestionLatencyNanos;
@@ -174,6 +183,9 @@ public final class InputLogic {
      * @param settingsValues the current settings values
      */
     public void startInput(final String combiningSpec, final SettingsValues settingsValues) {
+        mAlwaysReplaceSession.reset();
+        mLatinIME.setAlwaysReplaceStripVisible(false);
+        configureAlwaysReplace(settingsValues);
         mCorrectionFeedbackStore.attach(mLatinIME);
         mAdaptiveTouchModel.attach(mLatinIME);
         mAccuracyDiagnosticsRecorder.attach(mLatinIME);
@@ -240,6 +252,8 @@ public final class InputLogic {
      * Clean up the input logic after input is finished.
      */
     public void finishInput() {
+        mAlwaysReplaceSession.reset();
+        mLatinIME.setAlwaysReplaceStripVisible(false);
         if (mWordComposer.isComposingWord()) {
             mConnection.finishComposingText();
             StatsUtils.onWordCommitUserTyped(mWordComposer.getTypedWord(), mWordComposer.isBatchMode());
@@ -260,6 +274,8 @@ public final class InputLogic {
      * @return the complete transaction object
      */
     public InputTransaction onTextInput(SettingsValues settingsValues, Event event, CapsMode keyboardCapsMode, LatinIME.UIHandler handler) {
+        // Clipboard, multi-character keys and external text are not fresh typing.
+        mAlwaysReplaceSession.reset();
         String rawText = event.getTextToCommit().toString();
         InputTransaction inputTransaction = new InputTransaction(settingsValues, event,
                 SystemClock.uptimeMillis(), mSpaceState,
@@ -312,6 +328,26 @@ public final class InputLogic {
     // interface
     public InputTransaction onPickSuggestionManually(SettingsValues settingsValues, SuggestedWordInfo suggestionInfo,
             CapsMode keyboardCapsMode, String currentKeyboardScript, LatinIME.UIHandler handler) {
+        if (suggestionInfo.isKindOf(SuggestedWordInfo.KIND_ALWAYS_REPLACE)
+                || suggestionInfo.isKindOf(SuggestedWordInfo.KIND_KEEP_LITERAL)) {
+            final InputTransaction transaction = new InputTransaction(settingsValues,
+                    Event.createSuggestionPickedEvent(suggestionInfo), SystemClock.uptimeMillis(),
+                    mSpaceState, keyboardCapsMode);
+            configureAlwaysReplace(settingsValues);
+            if (mAlwaysReplaceSession.isCurrent(suggestionInfo.mAlwaysReplaceIdentity)) {
+                mConnection.beginBatchEdit();
+                if (commitAlwaysReplace(settingsValues, "", suggestionInfo.isKindOf(SuggestedWordInfo.KIND_KEEP_LITERAL))) {
+                    transaction.setDidAffectContents();
+                    if (settingsValues.mAutospaceAfterSuggestion) mSpaceState = SpaceState.PHANTOM;
+                    mLastComposedWord.deactivate();
+                }
+                mConnection.endBatchEdit();
+            }
+            transaction.requireShiftUpdate(InputTransaction.SHIFT_UPDATE_NOW);
+            publishAlwaysReplaceSuggestions();
+            handler.postUpdateSuggestionStrip(SuggestedWords.INPUT_STYLE_NONE);
+            return transaction;
+        }
         if (isInlineEmojiSearchAction()) {
             deleteTextReplacedByEmoji();
         }
@@ -407,6 +443,7 @@ public final class InputLogic {
             return inputTransaction;
         }
 
+        mAlwaysReplaceSession.reset();
         commitChosenWord(settingsValues, suggestion, LastComposedWord.COMMIT_TYPE_MANUAL_PICK, LastComposedWord.NOT_A_SEPARATOR);
         mConnection.endBatchEdit();
         // Don't allow cancellation of manual pick
@@ -452,10 +489,13 @@ public final class InputLogic {
              int newSelEnd, int composingSpanStart, int composingSpanEnd, SettingsValues settingsValues) {
         boolean expectCursorMove = mightBeExpectedCursorMove(); // reset the timer
         if (mConnection.isBelatedExpectedUpdate(oldSelStart, newSelStart, oldSelEnd, newSelEnd, composingSpanStart, composingSpanEnd)) {
+            if (expectCursorMove) mAlwaysReplaceSession.reset();
             // return whether we expect a user-initiated explicit cursor move (i.e. not as result of other input, but e.g. space swipe)
             // note that arrow keys are not considered, because for them isBelatedExpectedUpdate returns false
             return expectCursorMove;
         }
+
+        mAlwaysReplaceSession.reset();
 
         // if all text is gone, we treat it like onStartInput
         if (GestureDataGatheringKt.useBackgroundGathering && newSelStart == 0 && newSelEnd == 0 && !mConnection.hasTextAfterCursor())
@@ -526,6 +566,7 @@ public final class InputLogic {
     }
 
     public boolean moveCursorByAndReturnIfInsideComposingWord(int distance) {
+        mAlwaysReplaceSession.reset();
         return mWordComposer.moveCursorByAndReturnIfInsideComposingWord(distance);
     }
 
@@ -544,6 +585,10 @@ public final class InputLogic {
      */
     public InputTransaction onCodeInput(SettingsValues settingsValues, @NonNull Event event,
             CapsMode keyboardCapsMode, String currentKeyboardScript, LatinIME.UIHandler handler) {
+        configureAlwaysReplace(settingsValues);
+        mSkipAlwaysReplaceObservation = false;
+        final boolean observeAlwaysReplace = !event.isFunctionalKeyEvent() || event.getKeyCode() == KeyCode.DELETE;
+        if (observeAlwaysReplace) beginAlwaysReplaceInput();
         mWordBeingCorrectedByCursor = null;
         mJustRevertedACommit = false;
 
@@ -601,12 +646,17 @@ public final class InputLogic {
         if (KeyCode.DELETE != processedEvent.getKeyCode()) {
             mEnteredText = null;
         }
+        if (inputTransaction.didAutoCorrect() && !mSkipAlwaysReplaceObservation) mAlwaysReplaceSession.reset();
+        if (observeAlwaysReplace && !mSkipAlwaysReplaceObservation) observeAlwaysReplaceInput();
+        if (observeAlwaysReplace) publishAlwaysReplaceSuggestions();
         mConnection.endBatchEdit();
         return inputTransaction;
     }
 
     public void onStartBatchInput(final SettingsValues settingsValues,
             final KeyboardSwitcher keyboardSwitcher, final LatinIME.UIHandler handler) {
+        configureAlwaysReplace(settingsValues);
+        beginAlwaysReplaceInput();
         mWordBeingCorrectedByCursor = null;
         mInputLogicHandler.onStartBatchInput();
         handler.showGesturePreviewAndSetSuggestions(SuggestedWords.getEmptyBatchInstance(), false);
@@ -619,14 +669,17 @@ public final class InputLogic {
             BackgroundGatheringCache.INSTANCE.onEditWord(mWordComposer.getTypedWord());
 
         mConnection.beginBatchEdit();
-        if (mWordComposer.isComposingWord()) {
+        if (commitAlwaysReplace(settingsValues, "", false)) {
+            // The next finalized swipe word starts a new occurrence.
+        } else if (mWordComposer.isComposingWord()) {
             if (mWordComposer.isCursorFrontOrMiddleOfComposingWord()) {
                 // If we are in the middle of a recorrection, we need to commit the recorrection
                 // first so that we can insert the batch input at the current cursor position.
                 // We also need to unlearn the original word that is now being corrected.
                 unlearnWord(mWordComposer.getTypedWord(), settingsValues, DictionaryFacilitator.UnlearnEvent.BACKSPACE);
                 resetEntireInputState(mConnection.getExpectedSelectionStart(), mConnection.getExpectedSelectionEnd(), true);
-            } else if (mWordComposer.isSingleLetter() && ! isInlineEmojiSearchAction()) {
+            } else if (mWordComposer.isSingleLetter() && ! isInlineEmojiSearchAction()
+                    && !mAlwaysReplaceSession.getProtectsPrefix()) {
                 // We auto-correct the previous (typed, not gestured) string iff it's one character
                 // long. The reason for this is, even in the middle of gesture typing, you'll still
                 // tap one-letter words and you want them auto-corrected (typically, "i" in English
@@ -714,7 +767,9 @@ public final class InputLogic {
     public void setSuggestedWords(final SuggestedWords suggestedWords) {
         if (!suggestedWords.isEmpty()) {
             final SuggestedWordInfo suggestedWordInfo;
-            if (suggestedWords.mWillAutoCorrect) {
+            if (hasAlwaysReplaceChoices(suggestedWords)) {
+                suggestedWordInfo = null; // Explicit matches commit through their verified range.
+            } else if (suggestedWords.mWillAutoCorrect) {
                 suggestedWordInfo = suggestedWords.getInfo(SuggestedWords.INDEX_OF_AUTO_CORRECTION);
             } else {
                 // We can't use suggestedWords.getWord(SuggestedWords.INDEX_OF_TYPED_WORD)
@@ -1215,6 +1270,20 @@ public final class InputLogic {
             final LatinIME.UIHandler handler) {
         final int codePoint = event.getCodePoint();
         final SettingsValues settingsValues = inputTransaction.getSettingsValues();
+        final boolean continuesRule = mAlwaysReplaceSession.continuesWith(codePoint);
+        if (continuesRule) {
+            // Preserve the literal separators of a configured phrase, including repeated spaces.
+            commitTyped(settingsValues, StringUtils.newSingleCodePointString(codePoint));
+            mConnection.commitCodePoint(codePoint);
+            mSpaceState = SpaceState.NONE;
+            cancelDoubleSpacePeriodCountdown();
+            inputTransaction.setRequiresUpdateSuggestions();
+            inputTransaction.requireShiftUpdate(InputTransaction.SHIFT_UPDATE_NOW);
+            return;
+        }
+        if (commitAlwaysReplace(settingsValues, StringUtils.newSingleCodePointString(codePoint), false)) {
+            inputTransaction.setDidAutoCorrect();
+        }
         final boolean wasComposingWord = mWordComposer.isComposingWord();
         // We avoid sending spaces in languages without spaces if we were composing.
         final boolean shouldAvoidSendingCode = Constants.CODE_SPACE == codePoint
@@ -2018,17 +2087,27 @@ public final class InputLogic {
      * @param inputTransaction The transaction in progress.
      */
     private void revertCommit(final InputTransaction inputTransaction) {
+        if (mLastComposedWord.mIsAlwaysReplace) {
+            final String expected = mLastComposedWord.mCommittedWord.toString() + mLastComposedWord.mSeparatorString;
+            if (!matchesActualEditor(expected, mConnection.getExpectedSelectionEnd())) {
+                mLastComposedWord.deactivate();
+                return;
+            }
+            mAlwaysReplaceSession.reset();
+            mSkipAlwaysReplaceObservation = true;
+        }
         final CharSequence originallyTypedWord = mLastComposedWord.mTypedWord;
         final CharSequence committedWord = mLastComposedWord.mCommittedWord;
         final String committedWordString = committedWord.toString();
         final int cancelLength = committedWord.length();
         final String separatorString = mLastComposedWord.mSeparatorString;
-        recordCorrectionRejection(inputTransaction.getSettingsValues(), mLastComposedWord.mNgramContext,
-                mLastComposedWord.mTypedWord, committedWordString);
-        learnTouchOffsets(inputTransaction.getSettingsValues(), mLastComposedWord,
-                mLastComposedWord.mTypedWord);
-        recordAccuracyDiagnostic(inputTransaction.getSettingsValues(), mLastComposedWord,
-                mLastComposedWord.mTypedWord, committedWordString, "REVERTED");
+        if (!mLastComposedWord.mIsAlwaysReplace) {
+            recordCorrectionRejection(inputTransaction.getSettingsValues(), mLastComposedWord.mNgramContext,
+                    mLastComposedWord.mTypedWord, committedWordString);
+            learnTouchOffsets(inputTransaction.getSettingsValues(), mLastComposedWord, mLastComposedWord.mTypedWord);
+            recordAccuracyDiagnostic(inputTransaction.getSettingsValues(), mLastComposedWord,
+                    mLastComposedWord.mTypedWord, committedWordString, "REVERTED");
+        }
         // If our separator is a space, we won't actually commit it,
         // but set the space state to PHANTOM so that a space will be inserted
         // on the next keypress
@@ -2050,7 +2129,7 @@ public final class InputLogic {
             }
         }
         mConnection.deleteTextBeforeCursor(deleteLength);
-        if (!TextUtils.isEmpty(committedWord)) {
+        if (!mLastComposedWord.mIsAlwaysReplace && !TextUtils.isEmpty(committedWord)) {
             unlearnWord(committedWordString, inputTransaction.getSettingsValues(), DictionaryFacilitator.UnlearnEvent.REVERT);
         }
         final String stringToCommit = originallyTypedWord +
@@ -2208,6 +2287,10 @@ public final class InputLogic {
      * @param actionId the action to perform
      */
     private void performEditorAction(final int actionId) {
+        configureAlwaysReplace(Settings.getValues());
+        if (commitAlwaysReplace(Settings.getValues(), "", false)) {
+            mLastComposedWord.deactivate();
+        }
         mConnection.performEditorAction(actionId);
     }
 
@@ -2421,6 +2504,8 @@ public final class InputLogic {
         if (TextUtils.isEmpty(batchInputText)) {
             return;
         }
+        configureAlwaysReplace(settingsValues);
+        beginAlwaysReplaceInput();
         mConnection.beginBatchEdit();
         if (SpaceState.PHANTOM == mSpaceState) {
             insertAutomaticSpaceIfOptionsAndTextAllow(settingsValues);
@@ -2429,6 +2514,8 @@ public final class InputLogic {
         mWordComposer.setBatchInputWord(batchInputText);
         enterInlineEmojiSearchIfNeeded(batchInputText.codePointAt(0), settingsValues);
         setComposingTextInternal(batchInputText, 1);
+        observeAlwaysReplaceInput();
+        publishAlwaysReplaceSuggestions();
         mConnection.endBatchEdit();
         // Space state must be updated before calling updateShiftState
         if (settingsValues.mAutospaceAfterGestureTyping)
@@ -2498,7 +2585,8 @@ public final class InputLogic {
         }
         final SuggestedWordInfo autoCorrectionOrNull = mWordComposer.getAutoCorrectionOrNull();
         final String typedWord = mWordComposer.getTypedWord();
-        final String stringToCommit = (autoCorrectionOrNull != null) ? autoCorrectionOrNull.mWord : typedWord;
+        final String stringToCommit = (autoCorrectionOrNull != null && !mAlwaysReplaceSession.getProtectsPrefix())
+                ? autoCorrectionOrNull.mWord : typedWord;
         if (stringToCommit != null) {
             final boolean isBatchMode = mWordComposer.isBatchMode();
             commitChosenWord(settingsValues, stringToCommit, LastComposedWord.COMMIT_TYPE_DECIDED_WORD, separator);
@@ -2747,7 +2835,118 @@ public final class InputLogic {
     }
 
     public SuggestedWords decorateWithUndoSuggestion(final SuggestedWords suggestedWords) {
+        final SuggestedWords explicit = getAlwaysReplaceSuggestions();
+        if (explicit != null && suggestedWords.mInputStyle != SuggestedWords.INPUT_STYLE_UPDATE_BATCH) return explicit;
+        if (hasAlwaysReplaceChoices(suggestedWords)) {
+            return addUndoSuggestionIfAvailable(SuggestedWords.getEmptyInstance(), SuggestedWords.INPUT_STYLE_NONE);
+        }
         return addUndoSuggestionIfAvailable(suggestedWords, suggestedWords.mInputStyle);
+    }
+
+    public static boolean hasAlwaysReplaceChoices(final SuggestedWords words) {
+        for (int i = 0; i < words.size(); i++) {
+            if (words.getInfo(i).isKindOf(SuggestedWordInfo.KIND_ALWAYS_REPLACE)) return true;
+        }
+        return false;
+    }
+
+    private void configureAlwaysReplace(final SettingsValues values) {
+        final android.content.SharedPreferences prefs = KtxKt.prefs(mLatinIME);
+        final String configuration = prefs.getString(AlwaysReplaceStore.RULES_KEY, "");
+        final boolean enabled = prefs.getBoolean(AlwaysReplaceStore.ENABLED_KEY, true)
+                && values.allowsAlwaysReplace() && !mLatinIME.isEmojiSearch() && !isInlineEmojiSearchAction();
+        if (!TextUtils.equals(configuration, mAlwaysReplaceConfiguration) || enabled != mAlwaysReplaceEnabled) {
+            mAlwaysReplaceConfiguration = configuration;
+            mAlwaysReplaceEnabled = enabled;
+            mAlwaysReplaceSession.configure(AlwaysReplaceStore.load(prefs), enabled);
+        }
+    }
+
+    private void beginAlwaysReplaceInput() {
+        if (mConnection.hasSelection() || mWordComposer.isCursorFrontOrMiddleOfComposingWord()) {
+            mAlwaysReplaceSession.reset();
+            return;
+        }
+        if (mAlwaysReplaceSession.getActive()) mAlwaysReplaceSession.beforeInput(
+                mConnection.getExpectedSelectionEnd(), mConnection.getTextBeforeCursor(mAlwaysReplaceSession.getReadLength(), 0));
+    }
+
+    private void observeAlwaysReplaceInput() {
+        if (mAlwaysReplaceSession.getActive()) mAlwaysReplaceSession.afterInput(
+                mConnection.getExpectedSelectionEnd(), mConnection.getTextBeforeCursor(mAlwaysReplaceSession.getReadLength(), 0));
+    }
+
+    @Nullable public SuggestedWords getAlwaysReplaceSuggestions() {
+        configureAlwaysReplace(Settings.getValues());
+        final AlwaysReplaceSession.Pending pending = mAlwaysReplaceSession.getPending();
+        if (pending == null) return null;
+        final CharSequence after = mConnection.getTextAfterCursor(2, 0);
+        if (after == null || !AlwaysReplaceMatcher.boundaryAfter(after.toString(), 0)) return null;
+        final ArrayList<SuggestedWordInfo> words = new ArrayList<>();
+        final SuggestedWordInfo typed = new SuggestedWordInfo(mWordComposer.getTypedWord(), "", 0,
+                SuggestedWordInfo.KIND_TYPED, Dictionary.DICTIONARY_USER_TYPED, -1, -1);
+        words.add(typed);
+        final SuggestedWordInfo replacement = new SuggestedWordInfo(pending.getReplacement(), "", SuggestedWordInfo.MAX_SCORE,
+                SuggestedWordInfo.KIND_ALWAYS_REPLACE, Dictionary.DICTIONARY_USER_TYPED, -1, -1);
+        replacement.mAlwaysReplaceIdentity = pending.getIdentity();
+        words.add(replacement);
+        final SuggestedWordInfo literal = new SuggestedWordInfo(pending.getOriginal(), "", 0,
+                SuggestedWordInfo.KIND_KEEP_LITERAL, Dictionary.DICTIONARY_USER_TYPED, -1, -1);
+        literal.mAlwaysReplaceIdentity = pending.getIdentity();
+        words.add(literal);
+        return new SuggestedWords(words, null, typed, false, true, false,
+                SuggestedWords.INPUT_STYLE_TYPING, pending.getIdentity());
+    }
+
+    private void publishAlwaysReplaceSuggestions() {
+        final SuggestedWords explicit = getAlwaysReplaceSuggestions();
+        if (explicit != null) mSuggestionStripViewAccessor.setSuggestions(explicit);
+        else if (hasAlwaysReplaceChoices(mSuggestedWords)) mSuggestionStripViewAccessor.setSuggestions(SuggestedWords.getEmptyInstance());
+    }
+
+    private boolean matchesActualEditor(final String original, final int expectedEnd) {
+        final android.view.inputmethod.InputConnection connection = mLatinIME.getCurrentInputConnection();
+        if (connection == null || mConnection.hasSelection()) return false;
+        try {
+            final ExtractedTextRequest request = new ExtractedTextRequest();
+            request.hintMaxChars = original.length() + 2;
+            request.hintMaxLines = 1;
+            final ExtractedText selection = connection.getExtractedText(request, 0);
+            final CharSequence before = connection.getTextBeforeCursor(original.length(), 0);
+            final CharSequence after = connection.getTextAfterCursor(2, 0);
+            return selection != null && selection.startOffset + selection.selectionStart == expectedEnd
+                    && selection.selectionStart == selection.selectionEnd
+                    && before != null && TextUtils.equals(before, original)
+                    && after != null && AlwaysReplaceMatcher.boundaryAfter(after.toString(), 0);
+        } catch (RuntimeException ignored) {
+            // An unavailable editor must never cause a destructive suffix replacement.
+            return false;
+        }
+    }
+
+    /** Used by boundaries, keyboard actions and both manual choices. Never trust a stale preview. */
+    private boolean commitAlwaysReplace(final SettingsValues values, final String separator, final boolean keepLiteral) {
+        configureAlwaysReplace(values);
+        final AlwaysReplaceSession.Pending pending = mAlwaysReplaceSession.getPending();
+        if (pending == null) return false;
+        if (mConnection.getExpectedSelectionEnd() != pending.getEnd()
+                || !matchesActualEditor(pending.getOriginal(), pending.getEnd())) {
+            mAlwaysReplaceSession.reset();
+            return false;
+        }
+        final String result = keepLiteral ? pending.getOriginal() : pending.getReplacement();
+        mConnection.finishComposingText();
+        mWordComposer.reset();
+        mConnection.deleteTextBeforeCursor(pending.getOriginal().length());
+        mConnection.commitText(result, 1);
+        mLastComposedWord = new LastComposedWord(new ArrayList<>(), null, pending.getOriginal(), result,
+                separator, NgramContext.EMPTY_PREV_WORDS_INFO, CapsMode.OFF);
+        mLastComposedWord.mIsAlwaysReplace = true;
+        if (keepLiteral) mLastComposedWord.deactivate();
+        mAlwaysReplaceSession.reset();
+        mSkipAlwaysReplaceObservation = true;
+        mSpaceState = SpaceState.NONE;
+        return true;
     }
 
     /**

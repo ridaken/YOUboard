@@ -357,6 +357,13 @@ public class SettingsValues {
                 && (mAutoCorrectEnabled || mSuggestionsEnabled);
     }
 
+    /** Explicit replacements do not depend on dictionary lookup or probabilistic autocorrect. */
+    public boolean allowsAlwaysReplace() {
+        return mInputAttributes.mIsGeneralTextInput && !mInputAttributes.mIsPasswordField
+                && mInputAttributes.mShouldShowSuggestions
+                && !mInputAttributes.mApplicationSpecifiedCompletionOn;
+    }
+
     public boolean isWordSeparator(final int code) {
         return mSpacingAndPunctuations.isWordSeparator(code);
     }
