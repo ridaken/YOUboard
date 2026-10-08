@@ -50,9 +50,13 @@ import com.youboard.keyboard.latin.RichInputMethodSubtype;
 import com.youboard.keyboard.latin.settings.Settings;
 import com.youboard.keyboard.latin.settings.SettingsKt;
 import com.youboard.keyboard.latin.settings.SettingsValues;
+import com.youboard.keyboard.latin.settings.SplitKeyboardSettings;
 import com.youboard.keyboard.latin.suggestions.SuggestionStripView;
 import com.youboard.keyboard.latin.utils.CapsModeUtils;
 import com.youboard.keyboard.latin.utils.FoldableUtils;
+import com.youboard.keyboard.latin.utils.Diagnostics;
+import com.youboard.keyboard.latin.utils.DiagnosticEvent;
+import com.youboard.keyboard.latin.utils.DiagnosticReason;
 import com.youboard.keyboard.latin.utils.KtxKt;
 import com.youboard.keyboard.latin.utils.LanguageOnSpacebarUtils;
 import com.youboard.keyboard.latin.utils.Log;
@@ -213,12 +217,14 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         final MainKeyboardView keyboardView = mKeyboardView;
         final Keyboard oldKeyboard = keyboardView.getKeyboard();
         final Keyboard newKeyboard = mKeyboardLayoutSet.getKeyboard(keyboardElement);
-        if (oldKeyboard != null && (oldKeyboard.mId.getWidth() != newKeyboard.mId.getWidth()
-                || oldKeyboard.mId.getHeight() != newKeyboard.mId.getHeight()
-                || oldKeyboard.mId.isSplitLayout() != newKeyboard.mId.isSplitLayout()
-                || oldKeyboard.mId.getSplitSpacerRelativeWidth() != newKeyboard.mId.getSplitSpacerRelativeWidth())) {
-            keyboardView.cancelAllOngoingEvents();
-            mLatinIME.onKeyboardGeometryChanged();
+        if (newKeyboard.mId.getGeometrySignature() != null && (oldKeyboard == null
+                || !newKeyboard.mId.getGeometrySignature().equals(oldKeyboard.mId.getGeometrySignature()))) {
+            if (oldKeyboard != null) {
+                keyboardView.cancelAllOngoingEvents();
+                mLatinIME.onKeyboardGeometryChanged();
+                recordGeometry(DiagnosticReason.TOUCH_CANCELLED, oldKeyboard, newKeyboard);
+            }
+            recordGeometry(DiagnosticReason.GEOMETRY_APPLIED, oldKeyboard, newKeyboard);
         }
         keyboardView.setKeyboard(newKeyboard);
         mCurrentInputView.setKeyboardTopPadding(newKeyboard.mTopPadding);
@@ -233,6 +239,16 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
                                     && (currentSettingsValues.mInlineEmojiSearch || currentSettingsValues.mSuggestEmojis)) {
             EmojiParserKt.loadEmojiDefaultVersionsAndPopupSpecs(mThemeContext);
         }
+    }
+
+    private void recordGeometry(DiagnosticReason reason, Keyboard before, Keyboard after) {
+        final FoldableUtils.Snapshot environment = FoldableUtils.INSTANCE.getSnapshot();
+        Diagnostics.record(new DiagnosticEvent.Geometry(reason,
+                before == null ? null : before.mId.getGeometrySignature(), after.mId.getGeometrySignature(),
+                FoldableUtils.INSTANCE.isFolded(), environment.getCanAutomaticallySplit(),
+                SplitKeyboardSettings.mode(KtxKt.prefs(mLatinIME), SplitKeyboardSettings.key(
+                        mCurrentOrientation == Configuration.ORIENTATION_LANDSCAPE, FoldableUtils.INSTANCE.isFolded()))),
+                environment.getGeneration());
     }
 
     @Nullable public Keyboard getKeyboard() {
@@ -500,6 +516,9 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
             return;
         }
         final Settings settings = Settings.getInstance();
+        if (enabled != settings.getCurrent().mOneHandedModeEnabled)
+            Diagnostics.record(new DiagnosticEvent.Mode(DiagnosticReason.MANUAL_ONE_HANDED, enabled,
+                    mCurrentOrientation == Configuration.ORIENTATION_LANDSCAPE, FoldableUtils.INSTANCE.isFolded()));
         mKeyboardViewWrapper.setOneHandedModeEnabled(enabled);
         mKeyboardViewWrapper.setOneHandedGravity(settings.getCurrent().mOneHandedModeGravity);
 
@@ -519,6 +538,9 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     @Override
     public void setFloatingKeyboardEnabled(boolean enabled) {
         if (enabled != Settings.getValues().mIsFloatingKeyboard)
+            Diagnostics.record(new DiagnosticEvent.Mode(DiagnosticReason.MANUAL_FLOATING, enabled,
+                    mCurrentOrientation == Configuration.ORIENTATION_LANDSCAPE, FoldableUtils.INSTANCE.isFolded()));
+        if (enabled != Settings.getValues().mIsFloatingKeyboard)
             // mIsFloatingKeyboard is always disabled when device is locked, and we shouldn't mess up the setting
             SettingsKt.setFloatingKeyboardEnabled(mThemeContext, enabled);
         if (enabled) FloatingKeyboardUtils.setFloating(mCurrentInputView);
@@ -528,6 +550,9 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     public void toggleSplitKeyboardMode() {
         final Settings settings = Settings.getInstance();
+        Diagnostics.record(new DiagnosticEvent.Mode(DiagnosticReason.MANUAL_SPLIT,
+                !settings.getCurrent().mIsSplitKeyboardEnabled,
+                mCurrentOrientation == Configuration.ORIENTATION_LANDSCAPE, FoldableUtils.INSTANCE.isFolded()));
         settings.writeSplitKeyboardEnabled(
             !settings.getCurrent().mIsSplitKeyboardEnabled,
             mCurrentOrientation == Configuration.ORIENTATION_LANDSCAPE,

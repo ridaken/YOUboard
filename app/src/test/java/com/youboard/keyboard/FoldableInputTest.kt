@@ -6,6 +6,7 @@ import android.provider.Settings as AndroidSettings
 import android.view.MotionEvent
 import androidx.core.content.edit
 import com.youboard.keyboard.keyboard.KeyboardElement
+import com.youboard.keyboard.keyboard.AdaptiveTouchModel
 import com.youboard.keyboard.keyboard.KeyboardSwitcher
 import com.youboard.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import com.youboard.keyboard.latin.LatinIME
@@ -22,6 +23,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.android.controller.ServiceController
+import org.robolectric.shadows.ShadowDisplayManager
+import org.robolectric.shadows.ShadowLog
+import java.time.Duration
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -33,9 +37,15 @@ class FoldableInputTest {
     private lateinit var ime: LatinIME
     private val switcher get() = KeyboardSwitcher.getInstance()
     private var eventTime = 100L
+    private val modelField = AdaptiveTouchModel::class.java.getDeclaredField("instance").apply { isAccessible = true }
+    private var previousModel: Any? = null
 
     @Before fun setup() {
+        // Robolectric shares this process singleton across otherwise separate app directories.
+        previousModel = modelField.get(null)
+        modelField.set(null, null)
         val app = RuntimeEnvironment.getApplication()
+        resize(false)
         app.prefs().edit {
             app.prefs().all.keys.filter { it.startsWith("split_") || it.startsWith("one_handed") || it.startsWith("floating_") }
                 .forEach { remove(it) }
@@ -47,19 +57,102 @@ class FoldableInputTest {
         switcher.onCreateInputView(ime, true)
         switcher.reloadMainKeyboard()
         ShadowInputMethodService.reset()
-        shadowOf(Looper.getMainLooper()).idle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+        switcher.reloadMainKeyboard()
     }
 
     @After fun destroy() {
-        controller.destroy()
-        AndroidSettings.Global.putString(ime.contentResolver, "display_features", null)
-        FoldableUtils.init(ime)
+        try {
+            ShadowInputMethodService.inputViewShown = true
+            controller.destroy()
+            AndroidSettings.Global.putString(ime.contentResolver, "display_features", null)
+            FoldableUtils.init(ime)
+        } finally {
+            modelField.set(null, previousModel)
+        }
     }
 
     private fun posture(open: Boolean) {
+        resize(open)
         AndroidSettings.Global.putString(ime.contentResolver, "display_features",
             if (open) "fold-[350,0,350,800]-flat" else "")
+        ime.onConfigurationChanged(ime.resources.configuration)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+    }
+
+    private fun resize(open: Boolean) {
+        val qualifiers = if (open) "w700dp-h800dp-mdpi" else "w390dp-h800dp-mdpi"
+        ShadowDisplayManager.changeDisplay(0, qualifiers)
+        RuntimeEnvironment.setQualifiers(qualifiers)
+    }
+
+    private fun cancellations() = ShadowLog.getLogsForTag("YOUBoardDiagnostics")
+        .count { it.msg.startsWith("TOUCH_CANCELLED:") }
+
+    @Test fun `legacy noise during a tap neither swaps keyboard nor drops input`() {
+        posture(true)
+        tap('a'.code)
+        val keyboard = switcher.keyboard!!
+        val before = cancellations()
+        val initialText = ShadowInputMethodService.text
+        repeat(100) { i ->
+            val key = switcher.keyboard!!.getKey('b'.code)!!
+            val x = key.x + key.width / 2f
+            val y = key.y + key.height / 2f
+            val time = 100L + i * 200
+            val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, x, y, 0)
+            switcher.mainKeyboardView.onTouchEvent(down); down.recycle()
+            AndroidSettings.Global.putString(ime.contentResolver, "display_features",
+                if (i % 2 == 0) "" else "fold-[350,0,350,800]-flat")
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(20))
+            assertTrue(switcher.keyboard === keyboard)
+            val up = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_UP, x, y, 0)
+            switcher.mainKeyboardView.onTouchEvent(up); up.recycle()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(180))
+        }
+        assertEquals(before, cancellations())
+        assertEquals(initialText + "b".repeat(100), ShadowInputMethodService.text)
+    }
+
+    @Test fun `geometry only preference rebuilds and cancels exactly once`() {
+        posture(true)
+        val old = switcher.keyboard!!
+        val text = ShadowInputMethodService.text
+        val before = cancellations()
+        ime.prefs().edit { putFloat(Settings.PREF_KEY_GAP_SCALE_PREFIX + "_false_false", 1.8f) }
         shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(old === switcher.keyboard)
+        assertEquals(old.mId.width, switcher.keyboard!!.mId.width)
+        assertEquals(before + 1, cancellations())
+        assertEquals(text, ShadowInputMethodService.text)
+        ime.prefs().edit { remove(Settings.PREF_KEY_GAP_SCALE_PREFIX + "_false_false") }
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test fun `hidden keyboard defers geometry until input is shown again`() {
+        posture(true)
+        tap('a'.code)
+        val keyboard = switcher.keyboard!!
+        val before = cancellations()
+        val text = ShadowInputMethodService.text
+        ShadowInputMethodService.inputViewShown = false
+        resize(false)
+        AndroidSettings.Global.putString(ime.contentResolver, "display_features", "")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+        assertTrue(FoldableUtils.isFolded)
+        assertTrue(switcher.keyboard === keyboard)
+        assertEquals(before, cancellations())
+        assertEquals(text, ShadowInputMethodService.text)
+        ShadowInputMethodService.inputViewShown = true
+        val editorInfo = ime.currentInputEditorInfo.apply {
+            initialSelStart = ShadowInputMethodService.selectionStart
+            initialSelEnd = ShadowInputMethodService.selectionEnd
+        }
+        ime.onStartInputView(editorInfo, true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+        assertFalse(switcher.keyboard!!.mId.isSplitLayout)
+        assertEquals(390, switcher.keyboard!!.mId.width)
+        assertEquals(text, ShadowInputMethodService.text)
     }
 
     private fun tap(code: Int) {
@@ -80,14 +173,17 @@ class FoldableInputTest {
         tap('a'.code)
         val text = ShadowInputMethodService.text
         val composing = ShadowInputMethodService.composingText
+        val selection = ShadowInputMethodService.selectionStart to ShadowInputMethodService.selectionEnd
         posture(true)
         assertTrue(switcher.keyboard!!.mId.isSplitLayout, "${FoldableUtils.snapshot}, prefs=${ime.prefs().all}")
         assertEquals(text, ShadowInputMethodService.text)
         assertEquals(composing, ShadowInputMethodService.composingText)
+        assertEquals(selection, ShadowInputMethodService.selectionStart to ShadowInputMethodService.selectionEnd)
         posture(false)
         assertFalse(switcher.keyboard!!.mId.isSplitLayout)
         assertEquals(foldedGeometry, geometry())
         assertEquals(text, ShadowInputMethodService.text)
+        assertEquals(selection, ShadowInputMethodService.selectionStart to ShadowInputMethodService.selectionEnd)
         assertFalse(ime.prefs().contains(Settings.PREF_ENABLE_SPLIT_KEYBOARD_FOLDED))
     }
 

@@ -130,6 +130,7 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
         var text = ""
         var selectionStart = 0
         var selectionEnd = 0
+        var inputViewShown = true
         var composingStart = -1
         var composingEnd = -1
         var currentInputType = InputType.TYPE_CLASS_TEXT
@@ -148,6 +149,7 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
         else text.substring(composingStart, composingEnd)
 
         fun reset() {
+            inputViewShown = true
             batchEdit = 0
             text = ""
             selectionStart = 0
@@ -169,7 +171,7 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
     @Implementation
     fun getCurrentInputConnection() = ic
     @Implementation
-    fun isInputViewShown() = true // otherwise selection updates will do nothing
+    fun isInputViewShown() = inputViewShown
 
     // essentially this is the text field we're editing in
     private val ic = object : InputConnection {

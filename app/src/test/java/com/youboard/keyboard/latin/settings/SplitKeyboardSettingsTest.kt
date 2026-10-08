@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 @RunWith(RobolectricTestRunner::class)
 class SplitKeyboardSettingsTest {
     private val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("split-test", Context.MODE_PRIVATE)
-    private val inner = Snapshot(true, State.OPEN, 0, true, 700f, 700f)
+    private val inner = Snapshot(true, State.OPEN, 0, true, 700f, 700f, true)
 
     @Before fun clear() { prefs.edit { clear() } }
 

@@ -21,6 +21,7 @@ import com.youboard.keyboard.latin.RichInputMethodSubtype.Companion.noLanguageSu
 import com.youboard.keyboard.latin.settings.Settings
 import com.youboard.keyboard.latin.utils.InputTypeUtils
 import com.youboard.keyboard.latin.utils.Log
+import com.youboard.keyboard.latin.utils.KeyboardGeometrySignature
 import com.youboard.keyboard.latin.utils.ResourceUtils
 import com.youboard.keyboard.latin.utils.ScriptUtils
 import com.youboard.keyboard.latin.utils.ScriptUtils.script
@@ -128,6 +129,7 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
         // Indicates if the user has enabled the split-layout preference and the required ProductionFlags are enabled.
         var isSplitLayoutEnabled = false
         var splitSpacerRelativeWidth = 0f
+        var geometrySignature: KeyboardGeometrySignature? = null
     }
 
     class Builder(private val mContext: Context, ei: EditorInfo?) {
@@ -207,6 +209,10 @@ class KeyboardLayoutSet internal constructor(private val mContext: Context, priv
 
         fun build(): KeyboardLayoutSet {
             params.script = params.subtype.locale.script()
+            params.geometrySignature = KeyboardGeometrySignature.create(mContext, Settings.getValues()).copy(
+                width = params.keyboardWidth, height = params.keyboardHeight,
+                split = params.isSplitLayoutEnabled, splitGap = params.splitSpacerRelativeWidth,
+                oneHanded = params.oneHandedModeEnabled)
             return KeyboardLayoutSet(mContext, params)
         }
 

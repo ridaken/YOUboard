@@ -14,11 +14,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Display
 import android.view.WindowManager
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
+import androidx.window.layout.WindowLayoutInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +29,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
 
 object FoldableUtils {
     enum class State { UNKNOWN, FOLDED, OPEN }
@@ -38,9 +41,11 @@ object FoldableUtils {
         val isInnerDisplay: Boolean = false,
         val shortestDisplayWidthDp: Float = 0f,
         val keyboardWidthDp: Float = 0f,
+        val automaticSplitEligible: Boolean = false,
+        val generation: Long = 0,
     ) {
-        val canAutomaticallySplit: Boolean get() = isFoldable && state == State.OPEN &&
-            isInnerDisplay && shortestDisplayWidthDp >= 600f && keyboardWidthDp >= 600f
+        val canAutomaticallySplit: Boolean get() = automaticSplitEligible && isFoldable &&
+            state == State.OPEN && isInnerDisplay && shortestDisplayWidthDp >= 600f && keyboardWidthDp >= 600f
     }
 
     private val snapshotFlow = MutableStateFlow(Snapshot())
@@ -52,12 +57,13 @@ object FoldableUtils {
         }
     var isFoldable = false
         private set
+    private var generationCounter = 0L
     val isFolded: Boolean get() = snapshot.state == State.FOLDED
 
     fun init(context: Context) {
         val feature = parseFeatureState(getFeatureString(context))
         isFoldable = feature != State.UNKNOWN || hasFoldSensor(context)
-        snapshot = Snapshot(isFoldable, feature)
+        snapshot = Snapshot(isFoldable)
     }
 
     private fun hasFoldSensor(context: Context): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -86,19 +92,30 @@ object FoldableUtils {
         return State.OPEN
     }
 
-    internal fun stateFromAngle(angle: Float?): State = when {
+    internal fun featureCoordinates(value: String?): List<Int> =
+        if (parseFeatureState(value) == State.OPEN)
+            featurePattern.matchEntire(value!!.trim())!!.groupValues.drop(2).take(4).map { it.toInt() }
+        else emptyList()
+
+    internal fun stateFromAngle(angle: Float?, previous: State = State.UNKNOWN): State = when {
         angle == null || !angle.isFinite() || angle !in 0f..180f -> State.UNKNOWN
-        angle < 40f -> State.FOLDED
-        else -> State.OPEN
+        angle <= 35f -> State.FOLDED
+        angle >= 45f -> State.OPEN
+        else -> previous
     }
 
     internal fun resolveState(window: State, feature: State, sensor: State): State {
-        val known = listOf(window, feature, sensor).filter { it != State.UNKNOWN }
-        return if (known.distinct().size == 1) known.first() else State.UNKNOWN
+        return listOf(sensor, window, feature).firstOrNull { it != State.UNKNOWN } ?: State.UNKNOWN
     }
 
     /** Owned by the IME, including on devices whose only fold signal is WindowManager. */
-    class FoldableObserver(private val ime: InputMethodService, private val onChanged: Runnable) {
+    class FoldableObserver internal constructor(
+        private val ime: InputMethodService, private val onChanged: Runnable,
+        private val windowInfo: (Context) -> Flow<WindowLayoutInfo>,
+    ) {
+        constructor(ime: InputMethodService, onChanged: Runnable) : this(ime, onChanged, {
+            WindowInfoTracker.getOrCreate(it).windowLayoutInfo(it)
+        })
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         private var windowJob: Job? = null
         private var windowState = State.UNKNOWN
@@ -107,6 +124,14 @@ object FoldableUtils {
         private var observedDisplay = Display.INVALID_DISPLAY
         private var observedWidth = 0
         private var observedHeight = 0
+        private var observedDensity = 0f
+        private var generation = ++generationCounter
+        private var foldBounds: List<Int> = emptyList()
+        private var sensorStartNanos = 0L
+        private var hingeAngle: Float? = null
+        private val reducer = FoldStateReducer()
+        private val handler = Handler(Looper.getMainLooper())
+        private var settle: Runnable? = null
         private var closed = false
         private val sm = ime.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         private val featureObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -115,18 +140,16 @@ object FoldableUtils {
         private val sensorListener = object : SensorEventListener {
             override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
             override fun onSensorChanged(event: SensorEvent) {
-                sensorState = stateFromAngle(event.values.firstOrNull())
+                if (closed || event.timestamp < sensorStartNanos) return
+                hingeAngle = event.values.firstOrNull()?.takeIf { it.isFinite() && it in 0f..180f }
+                sensorState = stateFromAngle(hingeAngle, sensorState)
+                Diagnostics.sensor(hingeAngle, generation)
                 refresh()
             }
         }
 
         init {
             ime.contentResolver.registerContentObserver(displayFeaturesUri, false, featureObserver)
-            if (hasFoldSensor(ime)) {
-                sm.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE)?.let {
-                    sm.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
-                }
-            }
             refresh()
         }
 
@@ -136,46 +159,88 @@ object FoldableUtils {
             val wm = ime.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val display = wm.defaultDisplay
             val size = Point().also { display.getRealSize(it) }
-            if (observedDisplay != display.displayId || observedWidth != size.x || observedHeight != size.y) {
-                if (observedDisplay != display.displayId) sensorState = State.UNKNOWN
+            val density = ime.resources.displayMetrics.density
+            if (observedDisplay != display.displayId || observedWidth != size.x || observedHeight != size.y || observedDensity != density) {
+                val displayChanged = observedDisplay != display.displayId
+                generation = ++generationCounter
+                settle?.let(handler::removeCallbacks)
+                if (displayChanged) {
+                    sensorState = State.UNKNOWN
+                    hingeAngle = null
+                    sm.unregisterListener(sensorListener)
+                    sensorStartNanos = SystemClock.elapsedRealtimeNanos()
+                    if (hasFoldSensor(ime)) sm.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE)?.let {
+                        sm.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
+                    }
+                }
                 observedDisplay = display.displayId
                 observedWidth = size.x
                 observedHeight = size.y
+                observedDensity = density
                 windowState = State.UNKNOWN
-                unsupportedWindow = false
+                foldBounds = emptyList()
+                if (displayChanged) unsupportedWindow = false
                 windowJob?.cancel()
+                val subscriptionGeneration = generation
                 // A display/configuration change invalidates the old window's feature coordinates.
                 windowJob = scope.launch {
                     try {
-                        WindowInfoTracker.getOrCreate(ime).windowLayoutInfo(ime as Context).collect { info ->
+                        windowInfo(ime).collect { info ->
+                            if (closed || generation != subscriptionGeneration) return@collect
                             val folds = info.displayFeatures.filterIsInstance<FoldingFeature>()
-                            unsupportedWindow = folds.size > 1 || folds.any {
-                                it.occlusionType == FoldingFeature.OcclusionType.FULL
+                            foldBounds = folds.take(4).flatMap {
+                                listOf(it.bounds.left, it.bounds.top, it.bounds.right, it.bounds.bottom)
+                            }
+                            if (folds.isNotEmpty()) {
+                                unsupportedWindow = folds.size > 1 || folds.any {
+                                    it.occlusionType == FoldingFeature.OcclusionType.FULL
+                                }
                             }
                             windowState = if (folds.size == 1 && !unsupportedWindow) State.OPEN else State.UNKNOWN
                             if (folds.isNotEmpty()) isFoldable = true
-                            publish(display.displayId, size)
+                            publish(display.displayId, size, subscriptionGeneration)
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
+                        if (e !is Exception && e !is NotImplementedError) throw e
                         Log.w("FoldableUtils", "Window fold information unavailable", e)
+                        if (!closed && generation == subscriptionGeneration)
+                            Diagnostics.record(DiagnosticEvent.Failure(DiagnosticReason.WINDOW_UNAVAILABLE, e.javaClass.simpleName), generation)
                     }
                 }
             }
-            publish(display.displayId, size)
+            publish(display.displayId, size, generation)
         }
 
-        private fun publish(displayId: Int, size: Point) {
-            if (closed || displayId != observedDisplay || size.x != observedWidth || size.y != observedHeight) return
+        private fun publish(displayId: Int, size: Point, callbackGeneration: Long) {
+            if (closed || callbackGeneration != generation || displayId != observedDisplay || size.x != observedWidth || size.y != observedHeight) return
             // Device-global fallbacks must never classify a connected monitor as the inner screen.
             val primaryDisplay = displayId == Display.DEFAULT_DISPLAY
-            val feature = if (primaryDisplay) parseFeatureState(getFeatureString(ime)) else State.UNKNOWN
+            val featureString = if (primaryDisplay) getFeatureString(ime) else null
+            val feature = parseFeatureState(featureString)
+            if (primaryDisplay && feature == State.OPEN) isFoldable = true
             val sensor = if (primaryDisplay) sensorState else State.UNKNOWN
-            val state = resolveState(windowState, feature, sensor)
             val density = ime.resources.displayMetrics.density
-            val next = Snapshot(isFoldable, state, displayId,
-                !unsupportedWindow && state == State.OPEN && (windowState == State.OPEN || primaryDisplay),
-                minOf(size.x, size.y) / density, ResourceUtils.getAvailableKeyboardWidth(ime) / density)
+            val now = SystemClock.uptimeMillis()
+            val next = reducer.update(FoldStateReducer.Observation(isFoldable, displayId, primaryDisplay,
+                minOf(size.x, size.y) / density, ResourceUtils.getAvailableKeyboardWidth(ime) / density,
+                windowState, feature, sensor, unsupportedWindow), now).copy(generation = generation)
+            Diagnostics.fold(DiagnosticEvent.Fold(windowState, feature, sensor, next.state,
+                reducer.pendingPosture, next.canAutomaticallySplit, displayId,
+                next.shortestDisplayWidthDp, next.keyboardWidthDp, density, hingeAngle,
+                unsupportedWindow, when {
+                    featureString == null -> LegacyFeatureStatus.MISSING
+                    featureString.isEmpty() -> LegacyFeatureStatus.EMPTY
+                    feature == State.OPEN -> LegacyFeatureStatus.VALID
+                    else -> LegacyFeatureStatus.INVALID
+                }, foldBounds = foldBounds.ifEmpty { featureCoordinates(featureString) }), generation)
+            settle?.let(handler::removeCallbacks)
+            reducer.nextDeadline?.let {
+                val timerGeneration = generation
+                val timer = Runnable { if (!closed && generation == timerGeneration) refresh() }
+                settle = timer
+                handler.postAtTime(timer, it)
+            }
             if (next != snapshot) {
                 snapshot = next
                 onChanged.run()
@@ -184,7 +249,10 @@ object FoldableUtils {
 
         fun unregister(context: Context) {
             closed = true
+            generation = ++generationCounter
+            handler.removeCallbacksAndMessages(null)
             scope.cancel()
+            Diagnostics.observerStopped()
             context.contentResolver.unregisterContentObserver(featureObserver)
             sm.unregisterListener(sensorListener)
             snapshot = Snapshot(isFoldable)

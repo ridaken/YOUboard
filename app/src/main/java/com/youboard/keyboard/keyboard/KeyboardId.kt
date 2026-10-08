@@ -13,6 +13,7 @@ import com.youboard.keyboard.latin.CapsMode
 import com.youboard.keyboard.latin.R
 import com.youboard.keyboard.latin.RichInputMethodSubtype
 import com.youboard.keyboard.latin.utils.InputTypeUtils
+import com.youboard.keyboard.latin.utils.KeyboardGeometrySignature
 
 /**
  * Unique identifier for each keyboard type.
@@ -38,6 +39,7 @@ data class KeyboardId(
     val internalAction: KeyboardLayoutSet.InternalAction?,
     val emojiSearchAvailable: Boolean,
     val splitSpacerRelativeWidth: Float = 0f,
+    val geometrySignature: KeyboardGeometrySignature? = null,
 ) {
     lateinit var editorInfo: EditorInfo // we don't want it in the data class constructor
 
@@ -62,6 +64,7 @@ data class KeyboardId(
         params.internalAction,
         params.emojiSearchAvailable,
         params.splitSpacerRelativeWidth,
+        params.geometrySignature,
     ) {
         editorInfo = params.editorInfo
     }

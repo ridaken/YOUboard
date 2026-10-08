@@ -77,7 +77,9 @@ fun SplitKeyboardPreference() {
                             onClick = { selectedProfile = profile })
                     } else {
                         SwitchPreference(name = profile.second, key = profile.first,
-                            default = Defaults.PREF_ENABLE_SPLIT_KEYBOARD)
+                            default = Defaults.PREF_ENABLE_SPLIT_KEYBOARD) { enabled ->
+                            SplitKeyboardSettings.write(prefs, profile.first, if (enabled) Mode.SPLIT else Mode.STANDARD)
+                        }
                     }
                 }
             }
