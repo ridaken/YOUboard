@@ -57,6 +57,7 @@ import com.youboard.keyboard.latin.utils.FoldableUtils;
 import com.youboard.keyboard.latin.utils.Diagnostics;
 import com.youboard.keyboard.latin.utils.DiagnosticEvent;
 import com.youboard.keyboard.latin.utils.DiagnosticReason;
+import com.youboard.keyboard.latin.utils.CancellationCause;
 import com.youboard.keyboard.latin.utils.KtxKt;
 import com.youboard.keyboard.latin.utils.LanguageOnSpacebarUtils;
 import com.youboard.keyboard.latin.utils.Log;
@@ -220,9 +221,8 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         if (newKeyboard.mId.getGeometrySignature() != null && (oldKeyboard == null
                 || !newKeyboard.mId.getGeometrySignature().equals(oldKeyboard.mId.getGeometrySignature()))) {
             if (oldKeyboard != null) {
-                keyboardView.cancelAllOngoingEvents();
+                keyboardView.cancelAllOngoingEvents(CancellationCause.GEOMETRY);
                 mLatinIME.onKeyboardGeometryChanged();
-                recordGeometry(DiagnosticReason.TOUCH_CANCELLED, oldKeyboard, newKeyboard);
             }
             recordGeometry(DiagnosticReason.GEOMETRY_APPLIED, oldKeyboard, newKeyboard);
         }
@@ -734,7 +734,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     public void deallocateMemory() {
         if (mKeyboardView != null) {
-            mKeyboardView.cancelAllOngoingEvents();
+            mKeyboardView.cancelAllOngoingEvents(CancellationCause.MEMORY_RELEASE);
             mKeyboardView.deallocateMemory();
         }
         if (mEmojiPalettesView != null) {
@@ -755,7 +755,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     public View onCreateInputView(@NonNull Context displayContext, boolean isHardwareAcceleratedDrawingEnabled) {
         Log.d(TAG, "create new input view");
         if (mKeyboardView != null) {
-            mKeyboardView.closing();
+            mKeyboardView.closing(CancellationCause.VIEW_REPLACED);
         }
         PointerTracker.clearOldViewData();
         SharedPreferences prefs = KtxKt.prefs(displayContext);

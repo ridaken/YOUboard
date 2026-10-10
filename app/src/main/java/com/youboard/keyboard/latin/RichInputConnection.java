@@ -22,6 +22,8 @@ import com.youboard.keyboard.latin.common.ConstantsKt;
 import com.youboard.keyboard.latin.define.DebugFlags;
 import com.youboard.keyboard.latin.settings.Settings;
 import com.youboard.keyboard.latin.utils.Log;
+import com.youboard.keyboard.latin.utils.DiagnosticEvent;
+import com.youboard.keyboard.latin.utils.Diagnostics;
 import android.view.KeyEvent;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.CorrectionInfo;
@@ -276,6 +278,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             mExpectedSelStart = INVALID_CURSOR_POSITION;
             mExpectedSelEnd = INVALID_CURSOR_POSITION;
             Log.e(TAG, "Unable to connect to the editor to retrieve text.");
+            Diagnostics.record(new DiagnosticEvent.EditorReadFailure(mIC != null));
             return false;
         }
         mCommittedTextBeforeComposingText.append(textBeforeCursor);

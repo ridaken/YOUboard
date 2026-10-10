@@ -152,6 +152,8 @@ public final class InputLogic {
 
     private long mCursorMoveExpectedUntil = 0L;
 
+    public enum CacheRecoveryResult { RETRY, RECOVERED, EXHAUSTED }
+
     /**
      * Create a new instance of the input logic.
      * @param latinIME the instance of the parent LatinIME. We should remove this when we can.
@@ -2739,32 +2741,25 @@ public final class InputLogic {
      * Retry resetting caches in the rich input connection.
      * <p>
      * When the editor can't be accessed we can't reset the caches, so we schedule a retry.
-     * This method handles the retry, and re-schedules a new retry if we still can't access.
-     * We only retry up to 5 times before giving up.
+     * The UI handler schedules further bounded retries for the same lifecycle generation.
      *
      * @param tryResumeSuggestions Whether we should resume suggestions or not.
      * @param remainingTries How many times we may try again before giving up.
-     * @return whether true if the caches were successfully reset, false otherwise.
+     * @return the actual recovery outcome, including exhausted retries.
      */
-    public boolean retryResetCachesAndReturnSuccess(final boolean tryResumeSuggestions,
+    public CacheRecoveryResult retryResetCaches(final boolean tryResumeSuggestions,
             final int remainingTries, final LatinIME.UIHandler handler) {
         final boolean shouldFinishComposition = mConnection.hasSelection()
                 || !mConnection.isCursorPositionKnown();
-        if (!mConnection.resetCachesUponCursorMoveAndReturnSuccess(
+        final boolean recovered = mConnection.resetCachesUponCursorMoveAndReturnSuccess(
                 mConnection.getExpectedSelectionStart(), mConnection.getExpectedSelectionEnd(),
-                shouldFinishComposition)) {
-            if (0 < remainingTries) {
-                handler.postResetCaches(tryResumeSuggestions, remainingTries - 1);
-                return false;
-            }
-            // If remainingTries is 0, we should stop waiting for new tries, however we'll still
-            // return true as we need to perform other tasks (for example, loading the keyboard).
-        }
+                shouldFinishComposition);
+        if (!recovered && remainingTries > 0) return CacheRecoveryResult.RETRY;
         mConnection.tryFixIncorrectCursorPosition();
         if (tryResumeSuggestions) {
             handler.postResumeSuggestions(true /* shouldDelay */);
         }
-        return true;
+        return recovered ? CacheRecoveryResult.RECOVERED : CacheRecoveryResult.EXHAUSTED;
     }
 
     // we used to provide keyboard, settingsValues and keyboardShiftMode, but every time read it from current instance anyway

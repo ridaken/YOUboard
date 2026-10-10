@@ -58,6 +58,10 @@ import com.youboard.keyboard.latin.settings.Settings;
 import com.youboard.keyboard.latin.utils.KtxKt;
 import com.youboard.keyboard.latin.utils.LanguageOnSpacebarUtils;
 import com.youboard.keyboard.latin.utils.Log;
+import com.youboard.keyboard.latin.utils.CancellationCause;
+import com.youboard.keyboard.latin.utils.DiagnosticEvent;
+import com.youboard.keyboard.latin.utils.Diagnostics;
+import com.youboard.keyboard.latin.utils.FoldableUtils;
 import com.youboard.keyboard.latin.utils.TypefaceUtils;
 
 import java.util.ArrayList;
@@ -611,7 +615,11 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         return true;
     }
 
-    public void cancelAllOngoingEvents() {
+    public void cancelAllOngoingEvents(final CancellationCause cause) {
+        Diagnostics.record(
+                new DiagnosticEvent.Cancellation(cause, isShown(),
+                        PointerTracker.getActivePointerTrackerCount() > 0 || PointerTracker.isAnyInDraggingFinger()),
+                FoldableUtils.INSTANCE.getSnapshot().getGeneration());
         mTimerHandler.cancelAllMessages();
         PointerTracker.cancelGestureForLayoutChange();
         PointerTracker.setReleasedKeyGraphicsToAllKeys();
@@ -621,8 +629,8 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         PointerTracker.cancelAllPointerTrackers();
     }
 
-    public void closing() {
-        cancelAllOngoingEvents();
+    public void closing(final CancellationCause cause) {
+        cancelAllOngoingEvents(cause);
         mPopupKeysKeyboardCache.clear();
     }
 

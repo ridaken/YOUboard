@@ -149,7 +149,8 @@ class DiagnosticStoreTest {
         assertEquals(listOf("INPUT_SHOW", "STORAGE_RECOVERED"), saved.map { it.getValue("reason").jsonPrimitive.content })
         assertEquals("1", saved.last().getValue("data").jsonObject.getValue("lostRecordCount").jsonPrimitive.content)
         assertFalse(text.contains(sentinel))
-        assertFalse(text.contains("incomplete"))
+        assertFalse(text.contains("{\"incomplete\":"))
+        assertTrue(text.contains("History may be incomplete"))
         assertTrue(s.recent().contains("STORAGE_FAILURE"))
     }
 

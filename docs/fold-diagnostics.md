@@ -47,6 +47,44 @@ Critical changes flush/sync on a background worker. Abrupt termination can lose
 events that have not reached that worker. Export is ordered with pending writes.
 No diagnostic filesystem work or waiting is performed by the typing thread.
 
+## Startup and interruption diagnostics
+
+Hinge subscriptions refresh when physical display size/density changes and when
+the keyboard becomes visible after being hidden, even if the display ID stays
+the same. Separate subscription tokens reject old callbacks. A same-display
+refresh keeps the last valid hinge classification; invalid readings do not erase
+the hysteresis memory. Stationary readings are not expired by age.
+
+Deferred editor-cache recovery belongs to one lifecycle generation. Finishing,
+restarting, hiding, or destroying input invalidates old work before it can read
+the editor or reload a keyboard. Recovery no longer reloads geometry already
+applied during startup. Genuine lifecycle cleanup still cancels active touches.
+
+New events add `inputSession`, `viewActivation`, `geometryUpdate`, and
+`refreshCauses` to schema 1. These IDs are local to the process session, not app
+identifiers. `INPUT_CALLBACK` records received/applied/deferred/suppressed
+callbacks, visibility, restart flags, and editor availability. `ENVIRONMENT`
+records physical/window/resource metrics, source evidence, committed fold state,
+displayed geometry, and hinge sample age at startup/configuration changes.
+`SENSOR_SUBSCRIPTION` reports registration outcomes. `EDITOR_READ_FAILED`
+distinguishes a missing connection from a null text read; `EDITOR_RECOVERY`
+reports scheduled/retried/recovered/exhausted/invalidated operations.
+
+Every touch cancellation is recorded at the executing method with a typed cause
+and an `activeWork` flag, including input finish, window hide, view replacement,
+new editor, settings, memory release, and geometry changes. These flags contain
+no key identity, coordinates, text, or cursor positions.
+
+`DISRUPTION` warns when three applied split/standard reversals or five input
+finish callbacks while visible occur within five seconds. Additional activity
+is summarized at most once per second; five quiet seconds end the burst. Hidden
+finish callbacks do not trigger the visible-input warning. Warnings appear in
+logcat and prominently at the start of Save log exports, with recent correlated
+transitions and notices for missing or older history. No screen alert appears.
+Existing records remain exportable unchanged. Empty default subtype selections
+use the existing fallback silently; invalid nonempty selections produce one
+text-free warning per changed selection/enabled-subtype state.
+
 ## Validation
 
 Use Java 21 for Android 36 Robolectric tests (Android Studio's bundled runtime is
