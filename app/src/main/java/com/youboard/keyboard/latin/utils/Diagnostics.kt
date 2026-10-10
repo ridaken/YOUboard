@@ -20,6 +20,24 @@ object Diagnostics {
     private var samples = 0
     private var invalid = 0
     private var sampleGeneration = 0L
+    private var inputSession = 0L
+    private var viewActivation = 0L
+    private var geometryUpdate = 0L
+    internal var displayedGeometry: KeyboardGeometrySignature? = null
+        private set
+    private var refreshCauses: Set<RefreshCause> = emptySet()
+    private val disruption = KeyboardDisruptionTracker { record(it) }
+    private val checkDisruption = Runnable { disruption.tick(SystemClock.elapsedRealtime()); scheduleDisruption() }
+    private fun scheduleDisruption() {
+        handler.removeCallbacks(checkDisruption)
+        disruption.nextDeadline?.let { handler.postDelayed(checkDisruption,
+            (it - SystemClock.elapsedRealtime()).coerceAtLeast(1)) }
+    }
+
+    @JvmStatic fun inputStarted() { inputSession++ }
+    @JvmStatic fun viewStarted() { viewActivation++ }
+    @JvmStatic fun geometryCauses(causes: Set<RefreshCause>) { refreshCauses = causes.toSet() }
+    @JvmStatic fun geometryUpdate() { geometryUpdate++ }
     private val flushSamples = Runnable {
         record(DiagnosticEvent.SensorSummary(latest, minimum, maximum, samples, invalid), sampleGeneration)
         samples = 0; invalid = 0; minimum = null; maximum = null
@@ -39,9 +57,25 @@ object Diagnostics {
             context.createDeviceProtectedStorageContext() else context
 
     @JvmStatic @JvmOverloads fun record(event: DiagnosticEvent, generation: Long = 0) {
-        store?.record(event, generation)
+        val correlated = DiagnosticEvent.Correlated(event, inputSession, viewActivation, geometryUpdate, refreshCauses)
+        store?.record(correlated, generation)
         // A structured event is safe to mirror to system logs; general log messages stay memory-only.
-        android.util.Log.i("YOUBoardDiagnostics", "${event.reason}: ${event.fields()}")
+        if (event is DiagnosticEvent.Disruption && event.phase == BurstPhase.START)
+            android.util.Log.w("YOUBoardDiagnostics", "${event.reason}: ${correlated.fields()}")
+        else android.util.Log.i("YOUBoardDiagnostics", "${event.reason}: ${correlated.fields()}")
+        val now = SystemClock.elapsedRealtime()
+        if (event is DiagnosticEvent.Geometry && event.reason == DiagnosticReason.GEOMETRY_APPLIED)
+            displayedGeometry = event.after
+        if (event is DiagnosticEvent.Geometry && event.reason == DiagnosticReason.GEOMETRY_APPLIED &&
+            event.before != null && event.before.split != event.after.split) {
+            disruption.observe(DisruptionKind.LAYOUT_REVERSALS, now)
+            scheduleDisruption()
+        }
+        if (event is DiagnosticEvent.Input && event.callback == InputCallback.FINISH &&
+            event.stage == CallbackStage.RECEIVED && event.visible) {
+            disruption.observe(DisruptionKind.VISIBLE_INPUT_FINISHES, now)
+            scheduleDisruption()
+        }
     }
 
     internal fun fold(event: DiagnosticEvent.Fold, generation: Long) {
@@ -75,7 +109,15 @@ object Diagnostics {
 
     @JvmStatic fun recent(): String = store?.recent() ?: "Diagnostic history has not initialized."
     fun export(): String = store?.export() ?: "Diagnostic history has not initialized."
-    fun clear() { store?.clear() }
+    fun clear() {
+        store?.clear()
+        handler.post {
+            disruption.clear(); handler.removeCallbacks(checkDisruption)
+            handler.removeCallbacks(flushSamples)
+            samples = 0; invalid = 0; minimum = null; maximum = null
+            lastFold = null; lastGeneration = -1
+        }
+    }
 
     internal fun observerStopped() {
         handler.removeCallbacks(flushSamples)

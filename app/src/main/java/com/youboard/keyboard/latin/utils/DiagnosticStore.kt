@@ -197,6 +197,7 @@ internal class DiagnosticStore(
     /** Call from an IO worker, never the input/UI thread. The barrier orders export with writes. */
     fun export(): String = onWriter {
         attempt { prepare(); prune() }
+        val summary = DiagnosticExportSummary()
         buildString {
             appendLine("YOUBoard diagnostic history (schema 1; retention 7 days / 16 MiB)")
             val notice = failure
@@ -205,15 +206,21 @@ internal class DiagnosticStore(
             try {
                 files().forEach { file ->
                     file.bufferedReader().useLines { lines ->
-                        lines.forEach { appendLine(it); found = true }
+                        lines.forEach { summary.observe(it); appendLine(it); found = true }
                     }
                 }
             } catch (e: Exception) {
+                summary.missingHistory()
                 appendLine("History read failed: ${e.javaClass.simpleName}")
             }
             if (!found) appendLine("No retained diagnostic history.")
-            if (notice != null) appendLine(recent())
-        }
+            if (notice != null) {
+                summary.missingHistory()
+                val memory = recent()
+                memory.lineSequence().forEach(summary::observe)
+                appendLine(memory)
+            }
+        }.let { summary.text() + "\n" + it }
     }
 
     fun clear() = onWriter {

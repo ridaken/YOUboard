@@ -50,6 +50,16 @@ class SubtypeTest {
         assertEquals(emptyList(), SubtypeSettings.getAdditionalSubtypes().map { it.toSettingsSubtype() })
     }
 
+    @Test fun emptySelectedSubtypeFallsBackWithoutWarningOrPreferenceRepair() {
+        val prefs = latinIME.prefs()
+        prefs.edit().putString(Settings.PREF_SELECTED_SUBTYPE, "").apply()
+        val before = ShadowLog.getLogsForTag("SubtypeSettings").size
+        val selected = SubtypeSettings.getSelectedSubtype(prefs)
+        repeat(10) { assertEquals(selected, SubtypeSettings.getSelectedSubtype(prefs)) }
+        assertEquals(before, ShadowLog.getLogsForTag("SubtypeSettings").size)
+        assertEquals("", prefs.getString(Settings.PREF_SELECTED_SUBTYPE, null))
+    }
+
     @Test fun subtypeStaysEnabledOnEdits() {
         val prefs = latinIME.prefs()
         prefs.edit().putString(Settings.PREF_ADDITIONAL_SUBTYPES, "").apply() // clear it for convenience

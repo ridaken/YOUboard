@@ -137,6 +137,9 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
         var currentImeOptions = 0
         var lastEditorAction = 0
         var unavailableEditorText = false
+        var unavailableTextBeforeCursor = false
+        var connectionAvailable = true
+        var textReadCount = 0
 
         // convenience for access
         val textBeforeCursor get() = text.substring(0, selectionStart)
@@ -160,6 +163,9 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
             currentImeOptions = 0
             lastEditorAction = 0
             unavailableEditorText = false
+            unavailableTextBeforeCursor = false
+            connectionAvailable = true
+            textReadCount = 0
         }
     }
 
@@ -169,7 +175,7 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
         imeOptions = currentImeOptions
     }
     @Implementation
-    fun getCurrentInputConnection() = ic
+    fun getCurrentInputConnection(): InputConnection? = if (connectionAvailable) ic else null
     @Implementation
     fun isInputViewShown() = inputViewShown
 
@@ -177,7 +183,10 @@ class ShadowInputMethodService : org.robolectric.shadows.ShadowService() {
     private val ic = object : InputConnection {
         // pretty clear (though this may be slow depending on the editor)
         // bad return value here is likely the cause for that weird bug improved/fixed by fixIncorrectLength
-        override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence = textBeforeCursor.takeLast(p0)
+        override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence? {
+            textReadCount++
+            return if (unavailableTextBeforeCursor) null else textBeforeCursor.takeLast(p0)
+        }
         // pretty clear (though this may be slow depending on the editor)
         override fun getTextAfterCursor(p0: Int, p1: Int): CharSequence = textAfterCursor.take(p0)
         // pretty clear

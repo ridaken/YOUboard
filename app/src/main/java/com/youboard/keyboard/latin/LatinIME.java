@@ -82,6 +82,12 @@ import com.youboard.keyboard.latin.utils.KeyboardGeometrySignature;
 import com.youboard.keyboard.latin.utils.Diagnostics;
 import com.youboard.keyboard.latin.utils.DiagnosticEvent;
 import com.youboard.keyboard.latin.utils.DiagnosticReason;
+import com.youboard.keyboard.latin.utils.CancellationCause;
+import com.youboard.keyboard.latin.utils.RefreshCause;
+import com.youboard.keyboard.latin.utils.CallbackStage;
+import com.youboard.keyboard.latin.utils.InputCallback;
+import com.youboard.keyboard.latin.utils.RecoveryOutcome;
+import com.youboard.keyboard.latin.utils.EditorRecoveryState;
 import com.youboard.keyboard.latin.utils.GestureDataGatheringKt;
 import com.youboard.keyboard.latin.utils.GestureDataGatheringSettings;
 import com.youboard.keyboard.latin.utils.InlineAutofillUtils;
@@ -177,20 +183,26 @@ public class LatinIME extends InputMethodService implements
     private boolean mGeometryPreferenceDirty;
     private KeyboardGeometrySignature mLastSkippedGeometry;
     private final Runnable mRefreshKeyboardEnvironment = this::refreshKeyboardEnvironment;
+    private final java.util.EnumSet<RefreshCause> mRefreshCauses = java.util.EnumSet.noneOf(RefreshCause.class);
+    private final EditorRecoveryState mEditorRecovery = new EditorRecoveryState();
     private final SharedPreferences.OnSharedPreferenceChangeListener mSplitPreferenceListener = (prefs, key) -> {
         if (SplitKeyboardSettings.affectsGeometry(key)) {
             mGeometryPreferenceDirty = true;
-            requestKeyboardEnvironmentUpdate();
+            requestKeyboardEnvironmentUpdate(RefreshCause.PREFERENCE);
         }
     };
 
-    private void requestKeyboardEnvironmentUpdate() {
+    private void requestKeyboardEnvironmentUpdate(final RefreshCause cause) {
+        mRefreshCauses.add(cause);
         mKeyboardEnvironmentHandler.removeCallbacks(mRefreshKeyboardEnvironment);
         mKeyboardEnvironmentHandler.post(mRefreshKeyboardEnvironment);
     }
 
     private void refreshKeyboardEnvironment() {
         if (foldableObserver == null) return;
+        Diagnostics.geometryCauses(mRefreshCauses);
+        mRefreshCauses.clear();
+        Diagnostics.geometryUpdate();
         foldableObserver.refresh();
         // Hidden views are rebuilt by onStartInputView; do not disturb their editor connection.
         if (!isInputViewShown() || getCurrentInputEditorInfo() == null) return;
@@ -198,7 +210,8 @@ public class LatinIME extends InputMethodService implements
         if (view == null || view.getKeyboard() == null) return;
         final KeyboardId oldId = view.getKeyboard().mId;
         final FoldableUtils.Snapshot environment = FoldableUtils.INSTANCE.getSnapshot();
-        if (!mGeometryPreferenceDirty && environment.equals(mLastKeyboardEnvironment)) return;
+        final boolean preferenceChanged = mGeometryPreferenceDirty;
+        if (!preferenceChanged && environment.equals(mLastKeyboardEnvironment)) return;
         mGeometryPreferenceDirty = false;
         loadSettings();
         final SettingsValues values = mSettings.getCurrent();
@@ -211,7 +224,7 @@ public class LatinIME extends InputMethodService implements
             mGestureConsumer = GestureConsumer.newInstance(getCurrentInputEditorInfo(),
                     mInputLogic.getPrivateCommandPerformer(), mRichImm.getCurrentSubtypeLocale(),
                     mKeyboardSwitcher.getKeyboard());
-        } else if (!geometry.equals(mLastSkippedGeometry)) {
+        } else if (preferenceChanged || !geometry.equals(mLastSkippedGeometry)) {
             mLastSkippedGeometry = geometry;
             Diagnostics.record(new DiagnosticEvent.Geometry(DiagnosticReason.GEOMETRY_SKIPPED,
                     oldId.getGeometrySignature(), geometry, FoldableUtils.INSTANCE.isFolded(),
@@ -224,6 +237,22 @@ public class LatinIME extends InputMethodService implements
 
     public void onKeyboardGeometryChanged() {
         mInputLogic.onKeyboardGeometryChanged();
+    }
+
+    private void invalidateEditorRecovery() {
+        final long token = mEditorRecovery.getGeneration();
+        final boolean pending = mHandler.hasMessages(UIHandler.MSG_RESET_CACHES);
+        if (mEditorRecovery.invalidate() || pending) {
+            Diagnostics.record(new DiagnosticEvent.Recovery(RecoveryOutcome.INVALIDATED, token, 0));
+        }
+        mHandler.removeMessages(UIHandler.MSG_RESET_CACHES);
+    }
+
+    private void recordInputCallback(InputCallback callback, CallbackStage stage,
+            boolean restarting, boolean finishingInput, EditorInfo info) {
+        Diagnostics.record(new DiagnosticEvent.Input(callback, stage, isInputViewShown(), info != null,
+                info != null && info.inputType == android.text.InputType.TYPE_NULL, restarting, finishingInput),
+                FoldableUtils.INSTANCE.getSnapshot().getGeneration());
     }
 
     final static class RestartAfterDeviceUnlockReceiver extends BroadcastReceiver {
@@ -336,12 +365,19 @@ public class LatinIME extends InputMethodService implements
                     latinIme.onTailBatchInputResultShown(suggestedWords);
                     break;
                 case MSG_RESET_CACHES:
-                    final SettingsValues settingsValues = latinIme.mSettings.getCurrent();
-                    if (latinIme.mInputLogic.retryResetCachesAndReturnSuccess(
+                    final long recoveryToken = (Long) msg.obj;
+                    if (!latinIme.mEditorRecovery.accepts(recoveryToken)) break;
+                    final InputLogic.CacheRecoveryResult result = latinIme.mInputLogic.retryResetCaches(
                             msg.arg1 == ARG1_TRUE /* tryResumeSuggestions */,
-                            msg.arg2 /* remainingTries */, this /* handler */)) {
-                        // If we were able to reset the caches, then we can reload the keyboard.
-                        // Otherwise, we'll do it when we can.
+                            msg.arg2 /* remainingTries */, this /* handler */);
+                    if (!latinIme.mEditorRecovery.accepts(recoveryToken)) break;
+                    Diagnostics.record(new DiagnosticEvent.Recovery(
+                            RecoveryOutcome.valueOf(result.name()), recoveryToken, msg.arg2));
+                    if (result == InputLogic.CacheRecoveryResult.RETRY) {
+                        postResetCaches(msg.arg1 == ARG1_TRUE, msg.arg2 - 1, recoveryToken);
+                    } else if (latinIme.mEditorRecovery.consumeReload(recoveryToken)) {
+                        Diagnostics.geometryCauses(java.util.EnumSet.of(RefreshCause.RECOVERY));
+                        Diagnostics.geometryUpdate();
                         latinIme.mKeyboardSwitcher.reloadMainKeyboard();
                     }
                     break;
@@ -385,9 +421,18 @@ public class LatinIME extends InputMethodService implements
         }
 
         public void postResetCaches(final boolean tryResumeSuggestions, final int remainingTries) {
+            final LatinIME ime = getOwnerInstance();
+            if (ime == null) return;
+            postResetCaches(tryResumeSuggestions, remainingTries, ime.mEditorRecovery.getGeneration());
+        }
+
+        private void postResetCaches(final boolean tryResumeSuggestions, final int remainingTries, final long token) {
+            final LatinIME ime = getOwnerInstance();
+            if (ime == null || !ime.mEditorRecovery.accepts(token)) return;
             removeMessages(MSG_RESET_CACHES);
+            Diagnostics.record(new DiagnosticEvent.Recovery(RecoveryOutcome.SCHEDULED, token, remainingTries));
             sendMessage(obtainMessage(MSG_RESET_CACHES, tryResumeSuggestions ? 1 : 0,
-                    remainingTries, null));
+                    remainingTries, token));
         }
 
         public void postWaitForDictionaryLoad() {
@@ -520,6 +565,8 @@ public class LatinIME extends InputMethodService implements
 
         public void onStartInput(final EditorInfo editorInfo, final boolean restarting) {
             if (hasMessages(MSG_PENDING_IMS_CALLBACK)) {
+                final LatinIME ime = getOwnerInstance();
+                if (ime != null) ime.recordInputCallback(InputCallback.START, CallbackStage.DEFERRED, restarting, false, editorInfo);
                 // Typically this is the second onStartInput after orientation changed.
                 mHasPendingStartInput = true;
             } else {
@@ -540,6 +587,8 @@ public class LatinIME extends InputMethodService implements
             if (hasMessages(MSG_PENDING_IMS_CALLBACK)
                     && KeyboardId.Companion.equivalentEditorInfoForKeyboard(editorInfo, mAppliedEditorInfo)) {
                 // Typically this is the second onStartInputView after orientation changed.
+                final LatinIME ime = getOwnerInstance();
+                if (ime != null) ime.recordInputCallback(InputCallback.VIEW_START, CallbackStage.SUPPRESSED, restarting, false, editorInfo);
                 resetPendingImsCallback();
             } else {
                 if (mPendingSuccessiveImsCallback) {
@@ -561,6 +610,8 @@ public class LatinIME extends InputMethodService implements
 
         public void onFinishInputView(final boolean finishingInput) {
             if (hasMessages(MSG_PENDING_IMS_CALLBACK)) {
+                final LatinIME ime = getOwnerInstance();
+                if (ime != null) ime.recordInputCallback(InputCallback.VIEW_FINISH, CallbackStage.DEFERRED, false, finishingInput, ime.getCurrentInputEditorInfo());
                 // Typically this is the first onFinishInputView after orientation changed.
                 mHasPendingFinishInputView = true;
             } else {
@@ -577,6 +628,8 @@ public class LatinIME extends InputMethodService implements
 
         public void onFinishInput() {
             if (hasMessages(MSG_PENDING_IMS_CALLBACK)) {
+                final LatinIME ime = getOwnerInstance();
+                if (ime != null) ime.recordInputCallback(InputCallback.FINISH, CallbackStage.DEFERRED, false, true, ime.getCurrentInputEditorInfo());
                 // Typically this is the first onFinishInput after orientation changed.
                 mHasPendingFinishInput = true;
             } else {
@@ -618,7 +671,8 @@ public class LatinIME extends InputMethodService implements
         super.onCreate();
         Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.IME_CREATE));
 
-        foldableObserver = new FoldableUtils.FoldableObserver(this, this::requestKeyboardEnvironmentUpdate);
+        foldableObserver = new FoldableUtils.FoldableObserver(this,
+                () -> requestKeyboardEnvironmentUpdate(RefreshCause.FOLD_STATE));
         loadSettings();
         mClipboardHistoryManager.onCreate();
         mHandler.onCreate();
@@ -762,6 +816,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onDestroy() {
+        invalidateEditorRecovery();
         Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.IME_DESTROY));
         mKeyboardEnvironmentHandler.removeCallbacksAndMessages(null);
         KtxKt.prefs(this).unregisterOnSharedPreferenceChangeListener(mSplitPreferenceListener);
@@ -816,7 +871,7 @@ public class LatinIME extends InputMethodService implements
         mDisplayContext = KtxKt.getDisplayContext(this);
         if (foldableObserver != null) foldableObserver.refresh();
         mGeometryPreferenceDirty = true;
-        requestKeyboardEnvironmentUpdate();
+        requestKeyboardEnvironmentUpdate(RefreshCause.CONFIGURATION);
     }
 
     @Override
@@ -831,7 +886,7 @@ public class LatinIME extends InputMethodService implements
         StatsUtils.onCreateInputView();
         final View view = mKeyboardSwitcher.onCreateInputView(KtxKt.getDisplayContext(this), mIsHardwareAcceleratedDrawingEnabled);
         view.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            if (right - left != oldRight - oldLeft) requestKeyboardEnvironmentUpdate();
+            if (right - left != oldRight - oldLeft) requestKeyboardEnvironmentUpdate(RefreshCause.VIEW_WIDTH);
         });
         return view;
     }
@@ -861,17 +916,26 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onStartInput(final EditorInfo editorInfo, final boolean restarting) {
+        invalidateEditorRecovery();
+        Diagnostics.inputStarted();
+        recordInputCallback(InputCallback.START, CallbackStage.RECEIVED, restarting, false, editorInfo);
         mHandler.onStartInput(editorInfo, restarting);
     }
 
     @Override
     public void onStartInputView(final EditorInfo editorInfo, final boolean restarting) {
+        invalidateEditorRecovery();
+        Diagnostics.viewStarted();
+        recordInputCallback(InputCallback.VIEW_START, CallbackStage.RECEIVED, restarting, false, editorInfo);
         mHandler.onStartInputView(editorInfo, restarting);
         mStatsUtilsManager.onStartInputView();
     }
 
     @Override
     public void onFinishInputView(final boolean finishingInput) {
+        invalidateEditorRecovery();
+        recordInputCallback(InputCallback.VIEW_FINISH, CallbackStage.RECEIVED, false, finishingInput, getCurrentInputEditorInfo());
+        if (foldableObserver != null) foldableObserver.onInputViewHidden();
         StatsUtils.onFinishInputView();
         mHandler.onFinishInputView(finishingInput);
         mStatsUtilsManager.onFinishInputView();
@@ -881,6 +945,9 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onFinishInput() {
+        invalidateEditorRecovery();
+        recordInputCallback(InputCallback.FINISH, CallbackStage.RECEIVED, false, true, getCurrentInputEditorInfo());
+        if (foldableObserver != null) foldableObserver.onInputViewHidden();
         mHandler.onFinishInput();
         BackgroundGatheringCache.saveOrClear(this);
     }
@@ -918,6 +985,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void onStartInputInternal(final EditorInfo editorInfo, final boolean restarting) {
+        recordInputCallback(InputCallback.START, CallbackStage.APPLIED, restarting, false, editorInfo);
         super.onStartInput(editorInfo, restarting);
 
         final RichInputMethodSubtype subtypeForApp = editorInfo == null
@@ -932,9 +1000,15 @@ public class LatinIME extends InputMethodService implements
     }
 
     void onStartInputViewInternal(final EditorInfo editorInfo, final boolean restarting) {
+        recordInputCallback(InputCallback.VIEW_START, CallbackStage.APPLIED, restarting, false, editorInfo);
+        final java.util.EnumSet<RefreshCause> startupCauses = java.util.EnumSet.of(RefreshCause.STARTUP);
+        startupCauses.addAll(mRefreshCauses);
+        if (mGeometryPreferenceDirty) startupCauses.add(RefreshCause.PREFERENCE);
+        Diagnostics.geometryCauses(startupCauses);
+        Diagnostics.geometryUpdate();
         Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.INPUT_SHOW));
         super.onStartInputView(editorInfo, restarting);
-        if (foldableObserver != null) foldableObserver.refresh();
+        if (foldableObserver != null) foldableObserver.onInputViewShown();
 
         setGestureDataGatheringMode(editorInfo, restarting);
 
@@ -952,9 +1026,10 @@ public class LatinIME extends InputMethodService implements
         boolean isDifferentTextField = !restarting || inputTypeChanged;
 
         // we want to reload the settings before calling updateKeyboardTheme, because updateKeyboardTheme reads SettingsValues.mToolbarMode
-        if (isDifferentTextField || !currentSettingsValues.hasSameOrientation(getResources().getConfiguration())
+        if (isDifferentTextField || mGeometryPreferenceDirty || !currentSettingsValues.hasSameOrientation(getResources().getConfiguration())
                 || !FoldableUtils.INSTANCE.getSnapshot().equals(mLastKeyboardEnvironment)) {
             loadSettings();
+            mGeometryPreferenceDirty = false;
             if (hasSuggestionStripView())
                 mSuggestionStripView.updateVoiceKey();
         }
@@ -1028,6 +1103,7 @@ public class LatinIME extends InputMethodService implements
                 // a refresh later.
                 // We try resetting the caches up to 5 times before giving up.
                 mHandler.postResetCaches(isDifferentTextField, 5 /* remainingTries */);
+                mEditorRecovery.setPendingReload(true);
                 // mLastSelection{Start,End} are reset later in this method, no need to do it here
                 needToCallLoadKeyboardLater = true;
             } else {
@@ -1047,18 +1123,18 @@ public class LatinIME extends InputMethodService implements
         }
 
         final Keyboard shownKeyboard = mainKeyboardView.getKeyboard();
-        final boolean geometryChanged = shownKeyboard == null || !KeyboardGeometrySignature.create(this,
-                currentSettingsValues).equals(shownKeyboard.mId.getGeometrySignature());
+        final KeyboardGeometrySignature requestedGeometry = KeyboardGeometrySignature.create(this, currentSettingsValues);
+        final boolean geometryChanged = shownKeyboard == null || !requestedGeometry.equals(shownKeyboard.mId.getGeometrySignature());
         if (isDifferentTextField || geometryChanged) {
-            if (isDifferentTextField) mainKeyboardView.closing();
+            // A geometry application performs the same cancellation in KeyboardSwitcher.
+            if (isDifferentTextField && !geometryChanged) mainKeyboardView.closing(CancellationCause.NEW_EDITOR);
             suggest.setAutoCorrectionThreshold(currentSettingsValues.mAutoCorrectionThreshold);
             switcher.reloadMainKeyboard();
             mGestureConsumer = GestureConsumer.newInstance(editorInfo,
                     mInputLogic.getPrivateCommandPerformer(), mRichImm.getCurrentSubtypeLocale(),
                     switcher.getKeyboard());
             if (needToCallLoadKeyboardLater) {
-                // If we need to call loadKeyboard again later, we need to save its state now. The
-                // later call will be done in #retryResetCaches.
+                // Retain the requested panel/state if startup cannot apply the layout.
                 switcher.saveKeyboardState();
             }
         } else if (restarting) {
@@ -1070,6 +1146,18 @@ public class LatinIME extends InputMethodService implements
             // disruptive.
             // Space state must be updated before calling updateShiftState
             switcher.requestUpdatingShiftState(getCurrentAutoCapsState(), getCurrentRecapitalizeState());
+        }
+        final Keyboard appliedKeyboard = switcher.getKeyboard();
+        mEditorRecovery.setPendingReload(needToCallLoadKeyboardLater && (appliedKeyboard == null
+                || !requestedGeometry.equals(appliedKeyboard.mId.getGeometrySignature())
+                || !KeyboardId.Companion.equivalentEditorInfoForKeyboard(editorInfo, appliedKeyboard.mId.getEditorInfo())));
+        if (!geometryChanged && appliedKeyboard != null) {
+            final FoldableUtils.Snapshot environment = FoldableUtils.INSTANCE.getSnapshot();
+            Diagnostics.record(new DiagnosticEvent.Geometry(DiagnosticReason.GEOMETRY_SKIPPED,
+                    appliedKeyboard.mId.getGeometrySignature(), requestedGeometry, FoldableUtils.INSTANCE.isFolded(),
+                    environment.getCanAutomaticallySplit(), SplitKeyboardSettings.mode(KtxKt.prefs(this),
+                        SplitKeyboardSettings.key(currentSettingsValues.mDisplayOrientation == Configuration.ORIENTATION_LANDSCAPE,
+                                FoldableUtils.INSTANCE.isFolded()))), environment.getGeneration());
         }
         // Set neutral suggestions and show the toolbar if the "Auto show toolbar" setting is enabled.
         if (!mHandler.hasPendingResumeSuggestions()) {
@@ -1104,28 +1192,33 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onWindowHidden() {
+        invalidateEditorRecovery();
+        recordInputCallback(InputCallback.HIDDEN, CallbackStage.APPLIED, false, false, getCurrentInputEditorInfo());
+        if (foldableObserver != null) foldableObserver.onInputViewHidden();
         Diagnostics.record(new DiagnosticEvent.Lifecycle(DiagnosticReason.INPUT_HIDE));
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
-            mainKeyboardView.closing();
+            mainKeyboardView.closing(CancellationCause.WINDOW_HIDDEN);
         }
         clearNavigationBarColor();
     }
 
     void onFinishInputInternal() {
+        recordInputCallback(InputCallback.FINISH, CallbackStage.APPLIED, false, true, getCurrentInputEditorInfo());
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
 
         mDictionaryFacilitator.onFinishInput();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
-            mainKeyboardView.closing();
+            mainKeyboardView.closing(CancellationCause.INPUT_FINISH);
         }
     }
 
     void onFinishInputViewInternal(final boolean finishingInput) {
+        recordInputCallback(InputCallback.VIEW_FINISH, CallbackStage.APPLIED, false, finishingInput, getCurrentInputEditorInfo());
         super.onFinishInputView(finishingInput);
         Log.i(TAG, "onFinishInputView");
         cleanupInternalStateForFinishInput();
@@ -1847,7 +1940,7 @@ public class LatinIME extends InputMethodService implements
         requestHideSelf(0);
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
-            mainKeyboardView.closing();
+            mainKeyboardView.closing(CancellationCause.SETTINGS);
         }
         final Intent intent = new Intent();
         intent.setClass(LatinIME.this, SettingsActivity2.class);

@@ -26,6 +26,120 @@ import kotlin.test.assertTrue
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w700dp-h800dp-mdpi")
 class FoldableUtilsTest {
+    private class HingeSource : FoldableUtils.HingeSignalSource {
+        override val available = true
+        var succeeds = true
+        var unregistered = 0
+        val callbacks = mutableListOf<(Float?, Long) -> Unit>()
+        override fun register(callback: (Float?, Long) -> Unit): Boolean {
+            callbacks.add(callback)
+            return succeeds
+        }
+        override fun unregister() { unregistered++ }
+        fun send(angle: Float?, index: Int = callbacks.lastIndex) {
+            callbacks[index](angle, android.os.SystemClock.elapsedRealtimeNanos())
+        }
+    }
+
+    @Test fun `invalid hinge evidence does not erase deadband hysteresis`() {
+        val hinge = HingeClassification()
+        assertEquals(State.FOLDED, hinge.observe(0f))
+        assertEquals(State.UNKNOWN, hinge.observe(null))
+        assertEquals(State.FOLDED, hinge.observe(40f))
+        assertEquals(State.OPEN, hinge.observe(180f))
+        assertEquals(State.UNKNOWN, hinge.observe(Float.NaN))
+        assertEquals(State.OPEN, hinge.observe(40f))
+    }
+
+    @Test fun `same display resize and show refresh sensor but obsolete callbacks cannot close it`() {
+        val app = RuntimeEnvironment.getApplication()
+        Settings.Global.putString(app.contentResolver, "display_features", null)
+        FoldableUtils.init(app)
+        val controller = Robolectric.buildService(InputMethodService::class.java).create()
+        val source = HingeSource()
+        val observer = FoldableUtils.FoldableObserver(controller.get(), {}, source) {
+            MutableStateFlow(WindowLayoutInfo(emptyList()))
+        }
+        try {
+            source.send(180f)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+            assertTrue(FoldableUtils.snapshot.canAutomaticallySplit)
+            observer.onInputViewShown()
+            assertEquals(2, source.callbacks.size)
+            observer.onInputViewShown()
+            assertEquals(2, source.callbacks.size)
+            ShadowDisplayManager.changeDisplay(0, "w720dp-h820dp-mdpi")
+            RuntimeEnvironment.setQualifiers("w720dp-h820dp-mdpi")
+            observer.refresh()
+            assertEquals(3, source.callbacks.size)
+            source.send(0f, 0); source.send(0f, 1)
+            source.callbacks.last()(0f, 0L)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+            assertEquals(State.OPEN, FoldableUtils.snapshot.state)
+            source.send(Float.NaN)
+            source.send(40f)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+            assertEquals(State.OPEN, FoldableUtils.snapshot.state)
+            observer.onInputViewHidden(); observer.onInputViewShown()
+            assertEquals(4, source.callbacks.size)
+            observer.unregister(controller.get())
+            source.send(0f)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+            assertEquals(State.UNKNOWN, FoldableUtils.snapshot.state)
+        } finally {
+            observer.unregister(controller.get())
+            controller.destroy(); FoldableUtils.init(app)
+        }
+    }
+
+    @Test fun `failed sensor registration is explicit and does not prevent window evidence`() {
+        val app = RuntimeEnvironment.getApplication()
+        FoldableUtils.init(app)
+        val controller = Robolectric.buildService(InputMethodService::class.java).create()
+        val source = HingeSource().apply { succeeds = false }
+        val observer = FoldableUtils.FoldableObserver(controller.get(), {}, source) {
+            MutableStateFlow(foldInfo())
+        }
+        try {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+            assertTrue(FoldableUtils.snapshot.canAutomaticallySplit)
+            assertTrue(org.robolectric.shadows.ShadowLog.getLogsForTag("YOUBoardDiagnostics")
+                .any { it.msg.contains("SENSOR_SUBSCRIPTION") && it.msg.contains("\"registered\":false") })
+        } finally { observer.unregister(controller.get()); controller.destroy(); FoldableUtils.init(app) }
+    }
+
+    @Test fun `cover to inner display with unchanged identity settles fresh hinge evidence once`() {
+        val app = RuntimeEnvironment.getApplication()
+        Settings.Global.putString(app.contentResolver, "display_features", null)
+        ShadowDisplayManager.changeDisplay(0, "w390dp-h800dp-mdpi")
+        RuntimeEnvironment.setQualifiers("w390dp-h800dp-mdpi")
+        FoldableUtils.init(app)
+        val controller = Robolectric.buildService(InputMethodService::class.java).create()
+        val source = HingeSource()
+        val states = mutableListOf<State>()
+        val observer = FoldableUtils.FoldableObserver(controller.get(), { states.add(FoldableUtils.snapshot.state) }, source) {
+            MutableStateFlow(WindowLayoutInfo(emptyList()))
+        }
+        try {
+            source.send(0f)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(150))
+            assertEquals(State.FOLDED, FoldableUtils.snapshot.state)
+            ShadowDisplayManager.changeDisplay(0, "w700dp-h800dp-mdpi")
+            RuntimeEnvironment.setQualifiers("w700dp-h800dp-mdpi")
+            observer.refresh()
+            assertEquals(State.FOLDED, FoldableUtils.snapshot.state)
+            source.send(180f)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(149))
+            assertFalse(FoldableUtils.snapshot.canAutomaticallySplit)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
+            assertTrue(FoldableUtils.snapshot.canAutomaticallySplit)
+            source.send(0f, 0)
+            repeat(10) { observer.refresh() }
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
+            assertEquals(1, states.count { it == State.OPEN })
+            assertEquals(State.OPEN, FoldableUtils.snapshot.state)
+        } finally { observer.unregister(controller.get()); controller.destroy(); FoldableUtils.init(app) }
+    }
     @Test fun `fallback accepts only valid continuous folds`() {
         assertEquals(State.FOLDED, FoldableUtils.parseFeatureState(""))
         assertEquals(State.OPEN, FoldableUtils.parseFeatureState("fold-[350,0,350,800]-flat"))

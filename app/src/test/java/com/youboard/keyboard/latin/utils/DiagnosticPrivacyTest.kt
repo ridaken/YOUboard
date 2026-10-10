@@ -18,6 +18,11 @@ class DiagnosticPrivacyTest {
         val sentinel = "secret-typed-word-and-clipboard-content"
         Log.i("debug", sentinel)
         s.record(DiagnosticEvent.Lifecycle(DiagnosticReason.INPUT_SHOW))
+        s.record(DiagnosticEvent.Correlated(DiagnosticEvent.Input(InputCallback.VIEW_START,
+            CallbackStage.APPLIED, true, true, false), 1, 2, 3, setOf(RefreshCause.STARTUP)))
+        s.record(DiagnosticEvent.Cancellation(CancellationCause.INPUT_FINISH, true, true))
+        s.record(DiagnosticEvent.Recovery(RecoveryOutcome.EXHAUSTED, 4, 0))
+        s.record(DiagnosticEvent.Disruption(DisruptionKind.LAYOUT_REVERSALS, BurstPhase.START, 0, 1, 3))
         assertTrue(Log.getLog().any { it.message.contains(sentinel) })
         assertFalse(s.export().contains(sentinel))
         assertFalse(s.recent().contains(sentinel))

@@ -24,6 +24,7 @@ import com.youboard.keyboard.latin.utils.ScriptUtils.script
 import java.util.Locale
 
 object SubtypeSettings {
+    private val fallbackWarnings = FallbackWarningState()
     /** @return enabled subtypes. If no subtypes are enabled, but a contextForFallback is provided,
      *  subtypes for system locales will be returned, or en-US if none found. */
     fun getEnabledSubtypes(fallback: Boolean = false): List<InputMethodSubtype> {
@@ -95,16 +96,23 @@ object SubtypeSettings {
     }
 
     fun getSelectedSubtype(prefs: SharedPreferences): InputMethodSubtype {
-        val selectedSubtype = prefs.getString(Settings.PREF_SELECTED_SUBTYPE, Defaults.PREF_SELECTED_SUBTYPE)!!.toSettingsSubtype()
+        val selectedPref = prefs.getString(Settings.PREF_SELECTED_SUBTYPE, Defaults.PREF_SELECTED_SUBTYPE).orEmpty()
+        val selectedSubtype = selectedPref.toSettingsSubtype()
         if (selectedSubtype.isAdditionalSubtype(prefs) || selectedSubtype == SettingsSubtype.fallbackSubtype)
             return selectedSubtype.toAdditionalSubtype()
         // no additional subtype, must be a resource subtype
 
         val subtype = enabledSubtypes.firstOrNull { it.toSettingsSubtype() == selectedSubtype }
         if (subtype != null) {
+            fallbackWarnings.observe(null)
             return subtype
         } else if (enabledSubtypes.isNotEmpty()) {
-            Log.w(TAG, "selected subtype $selectedSubtype / ${prefs.getString(Settings.PREF_SELECTED_SUBTYPE, Defaults.PREF_SELECTED_SUBTYPE)} not found")
+            val suppressed = fallbackWarnings.observe(if (selectedPref.isEmpty()) null
+                else selectedPref to enabledSubtypes.toList())
+            if (suppressed != null) {
+                Log.w(TAG, "Selected subtype unavailable; using enabled fallback (suppressed=$suppressed)")
+                Diagnostics.record(DiagnosticEvent.SubtypeFallback(suppressed))
+            }
         }
         if (enabledSubtypes.isNotEmpty())
             return enabledSubtypes.first()

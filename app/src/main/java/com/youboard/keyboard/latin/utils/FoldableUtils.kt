@@ -109,11 +109,33 @@ object FoldableUtils {
     }
 
     /** Owned by the IME, including on devices whose only fold signal is WindowManager. */
+    internal interface HingeSignalSource {
+        val available: Boolean
+        fun register(callback: (Float?, Long) -> Unit): Boolean
+        fun unregister()
+    }
+    private class AndroidHingeSource(context: Context) : HingeSignalSource {
+        private val manager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        private val sensor = if (hasFoldSensor(context)) manager.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) else null
+        private var listener: SensorEventListener? = null
+        override val available get() = sensor != null
+        override fun register(callback: (Float?, Long) -> Unit): Boolean {
+            val next = object : SensorEventListener {
+                override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+                override fun onSensorChanged(event: SensorEvent) { callback(event.values.firstOrNull(), event.timestamp) }
+            }
+            listener = next
+            return sensor?.let { manager.registerListener(next, it, SensorManager.SENSOR_DELAY_UI) } ?: false
+        }
+        override fun unregister() { listener?.let(manager::unregisterListener); listener = null }
+    }
+
     class FoldableObserver internal constructor(
         private val ime: InputMethodService, private val onChanged: Runnable,
+        private val hingeSource: HingeSignalSource = AndroidHingeSource(ime),
         private val windowInfo: (Context) -> Flow<WindowLayoutInfo>,
     ) {
-        constructor(ime: InputMethodService, onChanged: Runnable) : this(ime, onChanged, {
+        constructor(ime: InputMethodService, onChanged: Runnable) : this(ime, onChanged, AndroidHingeSource(ime), {
             WindowInfoTracker.getOrCreate(it).windowLayoutInfo(it)
         })
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -128,24 +150,73 @@ object FoldableUtils {
         private var generation = ++generationCounter
         private var foldBounds: List<Int> = emptyList()
         private var sensorStartNanos = 0L
+        private var sensorGeneration = 0L
+        private var classification = HingeClassification()
+        private var lastSampleMs: Long? = null
+        private var visible = false
+        private var lastObservation: DiagnosticEvent.Fold? = null
         private var hingeAngle: Float? = null
         private val reducer = FoldStateReducer()
         private val handler = Handler(Looper.getMainLooper())
         private var settle: Runnable? = null
         private var closed = false
-        private val sm = ime.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         private val featureObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean, uri: Uri?) { refresh() }
         }
-        private val sensorListener = object : SensorEventListener {
-            override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
-            override fun onSensorChanged(event: SensorEvent) {
-                if (closed || event.timestamp < sensorStartNanos) return
-                hingeAngle = event.values.firstOrNull()?.takeIf { it.isFinite() && it in 0f..180f }
-                sensorState = stateFromAngle(hingeAngle, sensorState)
-                Diagnostics.sensor(hingeAngle, generation)
-                refresh()
+        private fun subscribeSensor(cause: SubscriptionCause) {
+            val token = ++sensorGeneration
+            sensorStartNanos = SystemClock.elapsedRealtimeNanos()
+            var registered = false
+            try {
+                hingeSource.unregister()
+                registered = hingeSource.register { angle, timestamp ->
+                    if (closed || token != sensorGeneration || timestamp < sensorStartNanos) return@register
+                    hingeAngle = angle?.takeIf { it.isFinite() && it in 0f..180f }
+                    lastSampleMs = SystemClock.elapsedRealtime()
+                    sensorState = classification.observe(hingeAngle)
+                    Diagnostics.sensor(hingeAngle, generation)
+                    refresh()
+                }
+            } catch (e: RuntimeException) {
+                Diagnostics.record(DiagnosticEvent.Failure(DiagnosticReason.SENSOR_SUBSCRIPTION,
+                    e.javaClass.simpleName), generation)
             }
+            if (hingeSource.available) isFoldable = true
+            Diagnostics.record(DiagnosticEvent.Subscription(cause, token, hingeSource.available, registered), generation)
+        }
+
+        fun onInputViewShown() {
+            if (closed) return
+            val rearm = !visible
+            visible = true
+            val before = sensorGeneration
+            refresh()
+            if (rearm && before == sensorGeneration) subscribeSensor(SubscriptionCause.SHOW)
+            recordEnvironment()
+        }
+        fun onInputViewHidden() { visible = false }
+
+        fun recordEnvironment() {
+            if (closed || observedDisplay == Display.INVALID_DISPLAY) return
+            val dm = ime.resources.displayMetrics
+            val source = when {
+                sensorState != State.UNKNOWN && observedDisplay == Display.DEFAULT_DISPLAY -> EvidenceSource.SENSOR
+                windowState != State.UNKNOWN -> EvidenceSource.WINDOW
+                observedDisplay == Display.DEFAULT_DISPLAY && parseFeatureState(getFeatureString(ime)) == State.OPEN -> EvidenceSource.LEGACY
+                observedDisplay == Display.DEFAULT_DISPLAY && parseFeatureState(getFeatureString(ime)) == State.FOLDED &&
+                    minOf(observedWidth, observedHeight) / dm.density < FoldStateReducer.EXIT_WIDTH_DP -> EvidenceSource.LEGACY
+                else -> EvidenceSource.NONE
+            }
+            val evidence = when (source) {
+                EvidenceSource.SENSOR -> sensorState
+                EvidenceSource.WINDOW -> windowState
+                EvidenceSource.LEGACY -> parseFeatureState(getFeatureString(ime))
+                EvidenceSource.NONE -> State.UNKNOWN
+            }
+            Diagnostics.record(DiagnosticEvent.Environment(observedWidth, observedHeight,
+                ResourceUtils.getAvailableKeyboardWidth(ime), dm.widthPixels, dm.heightPixels, dm.density,
+                observedDisplay, lastSampleMs?.let { SystemClock.elapsedRealtime() - it }, evidence, source,
+                lastObservation, Diagnostics.displayedGeometry), generation)
         }
 
         init {
@@ -160,18 +231,16 @@ object FoldableUtils {
             val display = wm.defaultDisplay
             val size = Point().also { display.getRealSize(it) }
             val density = ime.resources.displayMetrics.density
-            if (observedDisplay != display.displayId || observedWidth != size.x || observedHeight != size.y || observedDensity != density) {
+            val metricsChanged = observedDisplay != display.displayId || observedWidth != size.x || observedHeight != size.y || observedDensity != density
+            if (metricsChanged) {
                 val displayChanged = observedDisplay != display.displayId
                 generation = ++generationCounter
                 settle?.let(handler::removeCallbacks)
                 if (displayChanged) {
                     sensorState = State.UNKNOWN
                     hingeAngle = null
-                    sm.unregisterListener(sensorListener)
-                    sensorStartNanos = SystemClock.elapsedRealtimeNanos()
-                    if (hasFoldSensor(ime)) sm.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE)?.let {
-                        sm.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
-                    }
+                    lastSampleMs = null
+                    classification = HingeClassification()
                 }
                 observedDisplay = display.displayId
                 observedWidth = size.x
@@ -181,6 +250,7 @@ object FoldableUtils {
                 foldBounds = emptyList()
                 if (displayChanged) unsupportedWindow = false
                 windowJob?.cancel()
+                subscribeSensor(if (displayChanged) SubscriptionCause.DISPLAY else SubscriptionCause.METRICS)
                 val subscriptionGeneration = generation
                 // A display/configuration change invalidates the old window's feature coordinates.
                 windowJob = scope.launch {
@@ -210,6 +280,7 @@ object FoldableUtils {
                 }
             }
             publish(display.displayId, size, generation)
+            if (metricsChanged) recordEnvironment()
         }
 
         private fun publish(displayId: Int, size: Point, callbackGeneration: Long) {
@@ -225,7 +296,7 @@ object FoldableUtils {
             val next = reducer.update(FoldStateReducer.Observation(isFoldable, displayId, primaryDisplay,
                 minOf(size.x, size.y) / density, ResourceUtils.getAvailableKeyboardWidth(ime) / density,
                 windowState, feature, sensor, unsupportedWindow), now).copy(generation = generation)
-            Diagnostics.fold(DiagnosticEvent.Fold(windowState, feature, sensor, next.state,
+            val observation = DiagnosticEvent.Fold(windowState, feature, sensor, next.state,
                 reducer.pendingPosture, next.canAutomaticallySplit, displayId,
                 next.shortestDisplayWidthDp, next.keyboardWidthDp, density, hingeAngle,
                 unsupportedWindow, when {
@@ -233,7 +304,9 @@ object FoldableUtils {
                     featureString.isEmpty() -> LegacyFeatureStatus.EMPTY
                     feature == State.OPEN -> LegacyFeatureStatus.VALID
                     else -> LegacyFeatureStatus.INVALID
-                }, foldBounds = foldBounds.ifEmpty { featureCoordinates(featureString) }), generation)
+                }, foldBounds = foldBounds.ifEmpty { featureCoordinates(featureString) })
+            lastObservation = observation
+            Diagnostics.fold(observation, generation)
             settle?.let(handler::removeCallbacks)
             reducer.nextDeadline?.let {
                 val timerGeneration = generation
@@ -248,13 +321,18 @@ object FoldableUtils {
         }
 
         fun unregister(context: Context) {
+            if (closed) return
             closed = true
+            sensorGeneration++
             generation = ++generationCounter
             handler.removeCallbacksAndMessages(null)
             scope.cancel()
             Diagnostics.observerStopped()
             context.contentResolver.unregisterContentObserver(featureObserver)
-            sm.unregisterListener(sensorListener)
+            try { hingeSource.unregister() } catch (e: RuntimeException) {
+                Diagnostics.record(DiagnosticEvent.Failure(DiagnosticReason.SENSOR_SUBSCRIPTION,
+                    e.javaClass.simpleName), generation)
+            }
             snapshot = Snapshot(isFoldable)
         }
     }
