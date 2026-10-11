@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <title>YOUBoard launcher icon</title>
+  <desc>A single mint keycap with a Y cutout and a small ivory spacebar on deep teal.</desc>
+  <path id="background" fill="#123E48" d="M0 0H108V108H0Z"/>
+  <g id="foreground">
+    <path fill="#78E8C8" fill-rule="evenodd" d="M41 28H67Q77 28 77 38V63Q77 73 67 73H41Q31 73 31 63V38Q31 28 41 28Z M42 38H48.5L54 47L59.5 38H66L57 53V63H51V53Z"/>
+    <path fill="#45B99F" d="M31 61V63Q31 73 41 73H67Q77 73 77 63V61Q77 68 67 68H41Q31 68 31 61Z"/>
+    <path fill="#F2FCF9" d="M44 78H64Q66 78 66 80Q66 82 64 82H44Q42 82 42 80Q42 78 44 78Z"/>
+  </g>
+</svg>
