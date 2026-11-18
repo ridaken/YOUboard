@@ -1954,7 +1954,9 @@ public class LatinIME extends InputMethodService implements
     public void launchEmojiSearch() {
         Log.d("emoji-search", "before activity launch");
         startActivity(new Intent().setClass(this, EmojiSearchActivity.class)
-                          .putExtra(EmojiSearchActivity.SOURCE_INCOGNITO, mSettings.getCurrent().mIncognitoModeEnabled)
+                          .putExtra(EmojiSearchActivity.SOURCE_INCOGNITO, mSettings.getCurrent().mIncognitoModeEnabled
+                                  || mSettings.getCurrent().mInputAttributes.mIsPasswordField
+                                  || mSettings.getCurrent().mInputAttributes.mNoLearning)
                           .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_MULTIPLE_TASK));
     }
 

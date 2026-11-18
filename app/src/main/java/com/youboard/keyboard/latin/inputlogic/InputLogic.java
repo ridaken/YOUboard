@@ -462,6 +462,9 @@ public final class InputLogic {
 
         StatsUtils.onPickSuggestionManually(mSuggestedWords, suggestionInfo, mDictionaryFacilitator);
         StatsUtils.onWordCommitSuggestionPickedManually(suggestionInfo.mWord, mWordComposer.isBatchMode());
+        if (suggestionInfo.isEmoji() && canLearnCorrectionFeedback(settingsValues)) {
+            com.youboard.keyboard.keyboard.emoji.RecentEmojis.add(suggestion);
+        }
         return inputTransaction;
     }
 

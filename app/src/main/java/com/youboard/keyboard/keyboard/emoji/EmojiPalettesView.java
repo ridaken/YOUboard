@@ -248,6 +248,14 @@ public final class EmojiPalettesView extends LinearLayout
         host.addView(iconView);
         iconView.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         iconView.setOnClickListener(this);
+        if (category == EmojiCategory.Category.RECENTS) {
+            iconView.setOnLongClickListener(v -> {
+                AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_LONG_PRESS);
+                clearRecentKeys();
+
+                return true;
+            });
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -323,12 +331,26 @@ public final class EmojiPalettesView extends LinearLayout
             // todo: when we enter some emoticons, e.g. :-D, inline emoji search is triggered and emoji view is closed
             //  (one more instance of "emoji search should recognize emoticons", but in this case could be fixed in other ways)
             mKeyboardActionListener.onTextInput(key.getOutputText());
-        } else {
+        } else if (code != KeyCode.UNSPECIFIED) {
             mKeyboardActionListener.onCodeInput(code, NOT_A_COORDINATE, NOT_A_COORDINATE, false);
         }
         mKeyboardActionListener.onReleaseKey(code, false);
         if (Settings.getValues().mAlphaAfterEmojiInEmojiView)
             mKeyboardActionListener.onCodeInput(KeyCode.ALPHA, NOT_A_COORDINATE, NOT_A_COORDINATE, false);
+    }
+
+    @Override
+    public void onRemoveRecentsKey(Key key)
+    {
+        getRecentsKeyboard().removeRecentsKey(key);
+    }
+
+    private void clearRecentKeys() {
+        if (RecentEmojis.get().isEmpty()) return;
+        RecentEmojis.clear();
+        getRecentsKeyboard().removeAllKeys();
+        mPager.getAdapter().notifyItemChanged(mEmojiCategory.getRecentTabId());
+        KeyboardSwitcher.getInstance().showToast(getResources().getString(R.string.recent_emojis_cleared), true);
     }
 
     @Override
@@ -359,6 +381,8 @@ public final class EmojiPalettesView extends LinearLayout
         final KeyDrawParams params = new KeyDrawParams();
         params.updateParams(mEmojiLayoutParams.getBottomRowKeyboardHeight(), keyVisualAttr);
         new EmojiLayoutParams(getResources()).setEmojiListProperties(mPager); // necessary when floating
+        mEmojiCategory.reloadRecents();
+        mPager.getAdapter().notifyItemChanged(mEmojiCategory.getRecentTabId());
         setupSidePadding();
         initDictionaryFacilitator();
     }
@@ -368,7 +392,8 @@ public final class EmojiPalettesView extends LinearLayout
     }
 
     void addRecentKey(final Key key, final boolean incognito) {
-        if (incognito) {
+        if (incognito || Settings.getValues().mInputAttributes.mIsPasswordField
+                || Settings.getValues().mInputAttributes.mNoLearning) {
             // We do not want to log recent keys while being in incognito
             return;
         }

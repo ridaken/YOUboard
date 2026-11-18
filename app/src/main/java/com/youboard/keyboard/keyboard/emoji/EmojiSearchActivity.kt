@@ -304,8 +304,8 @@ class EmojiSearchActivity : ComponentActivity() {
             else
                 Character.toString(it.code))
 
-            KeyboardSwitcher.getInstance().emojiPalettesView.addRecentKey(
-                it, this.intent.getBooleanExtra(SOURCE_INCOGNITO, false))
+            val emoji = if (it.code == KeyCode.MULTIPLE_CODE_POINTS) it.getOutputText() else Character.toString(it.code)
+            if (!this.intent.getBooleanExtra(SOURCE_INCOGNITO, false) && emoji != null) RecentEmojis.add(emoji)
         }
         startService(intent)
         super.onStop()
@@ -347,6 +347,8 @@ class EmojiSearchActivity : ComponentActivity() {
                 pressedKey = key
                 finish()
             }
+
+            override fun onRemoveRecentsKey(key: Key?) {}
 
             override fun getDescription(emoji: String): String? = if (Settings.getValues().mShowEmojiDescriptions)
                 EmojiSearchRepository.description(getEmojiNeutralVersion(emoji))
