@@ -1754,8 +1754,9 @@ public class LatinIME extends InputMethodService implements
      *  returns whether a clipboard suggestion has been set.
      */
     public boolean tryShowClipboardSuggestion() {
-        final View clipboardView = mClipboardHistoryManager.getClipboardSuggestionView(getCurrentInputEditorInfo(), mSuggestionStripView);
-        if (clipboardView != null && hasSuggestionStripView()) {
+        if (!hasSuggestionStripView()) return false;
+        View clipboardView = mClipboardHistoryManager.getClipboardSuggestionView(getCurrentInputEditorInfo(), mSuggestionStripView);
+        if (clipboardView != null) {
             mSuggestionStripView.setExternalSuggestionView(clipboardView, false);
             return true;
         }
