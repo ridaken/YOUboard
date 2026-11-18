@@ -54,6 +54,7 @@ import kotlin.collections.set
 
 fun checkVersionUpgrade(context: Context) {
     val prefs = context.prefs()
+    com.youboard.keyboard.latin.settings.DeleteSwipeSettings.migrate(prefs)
     val oldVersion = prefs.getInt(Settings.PREF_VERSION_CODE, 0)
     if (oldVersion != BuildConfig.VERSION_CODE)
         AppUpgrade.onUpgrade(context)

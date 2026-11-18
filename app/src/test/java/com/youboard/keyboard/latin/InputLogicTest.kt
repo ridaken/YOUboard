@@ -102,6 +102,23 @@ class InputLogicTest {
         assertEquals("there", composingText)
     }
 
+    @Test fun deleteWordUsesWholeWordAndKeepsWhitespaceSeparate() {
+        setText("hello there ")
+        functionalKeyPress(KeyCode.DELETE_WORD)
+        assertEquals("hello there", text)
+        functionalKeyPress(KeyCode.DELETE_WORD)
+        assertEquals("hello ", text)
+    }
+
+    @Test fun deleteWordInvalidatesAlwaysReplaceWithoutApplyingIt() {
+        alwaysReplace("ypu")
+        typeAlwaysReplace("ypu")
+        functionalKeyPress(KeyCode.DELETE_WORD)
+        assertEquals("", text)
+        typeAlwaysReplace(" ")
+        assertEquals(" ", text)
+    }
+
     @Test fun deleteMultiCodepointText() {
         setText("hello there \uD83E\uDF00")
         functionalKeyPress(KeyCode.DELETE)

@@ -592,7 +592,7 @@ public final class InputLogic {
             CapsMode keyboardCapsMode, String currentKeyboardScript, LatinIME.UIHandler handler) {
         configureAlwaysReplace(settingsValues);
         mSkipAlwaysReplaceObservation = false;
-        final boolean observeAlwaysReplace = !event.isFunctionalKeyEvent() || event.getKeyCode() == KeyCode.DELETE;
+        final boolean observeAlwaysReplace = !event.isFunctionalKeyEvent() || (event.getKeyCode() == KeyCode.DELETE || event.getKeyCode() == KeyCode.DELETE_WORD);
         if (observeAlwaysReplace) beginAlwaysReplaceInput();
         mWordBeingCorrectedByCursor = null;
         mJustRevertedACommit = false;
@@ -853,6 +853,7 @@ public final class InputLogic {
             Log.w(TAG, "Blocked keycode while device was locked, this should not happen");
         }
         switch (keyCode) {
+            case KeyCode.DELETE_WORD:
             case KeyCode.DELETE:
                 handleBackspaceEvent(event, inputTransaction, currentKeyboardScript);
                 // Backspace is a functional key, but it affects the contents of the editor.
@@ -1411,6 +1412,7 @@ public final class InputLogic {
      */
     private void handleBackspaceEvent(final Event event, final InputTransaction inputTransaction,
             final String currentKeyboardScript) {
+        final boolean deleteWord = event.getKeyCode() == KeyCode.DELETE_WORD;
         mSpaceState = SpaceState.NONE;
         mDeleteCount++;
 
@@ -1449,8 +1451,14 @@ public final class InputLogic {
             } else {
                 if (GestureDataGatheringKt.useBackgroundGathering)
                     BackgroundGatheringCache.INSTANCE.removeLast(mWordComposer.getTypedWord());
-                mWordComposer.applyProcessedEvent(event);
-                StatsUtils.onBackspacePressed(1);
+                if (deleteWord) {
+                    int length = mWordComposer.size();
+                    mWordComposer.reset();
+                    StatsUtils.onBackspaceWordDelete(length);
+                } else {
+                    mWordComposer.applyProcessedEvent(event);
+                    StatsUtils.onBackspacePressed(1);
+                }
             }
             if (mWordComposer.isComposingWord()) {
                 setComposingTextInternal(getTextWithUnderline(mWordComposer.getTypedWord()), 1);
@@ -1576,7 +1584,9 @@ public final class InputLogic {
                         // TODO: Add a new StatsUtils method onBackspaceWhenNoText()
                         return;
                     }
-                    int lengthToDelete = mConnection.getCharCountToDeleteBeforeCursor();
+                    int lengthToDelete = deleteWord ? com.youboard.keyboard.latin.common.WordDeletion.lengthBeforeCursor(
+                            mConnection.getTextBeforeCursor(4096, 0), inputTransaction.getSettingsValues().mLocale,
+                            inputTransaction.getSettingsValues().mSpacingAndPunctuations) : mConnection.getCharCountToDeleteBeforeCursor();
                     mConnection.deleteTextBeforeCursor(lengthToDelete);
                     int totalDeletedLength = lengthToDelete;
                     if (mDeleteCount > Constants.DELETE_ACCELERATE_AT) {

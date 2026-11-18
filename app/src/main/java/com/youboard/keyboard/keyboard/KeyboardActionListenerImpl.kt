@@ -263,9 +263,12 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     private fun actualSteps(steps: Int): Int {
+        val wordMode = settings.current.mDeleteSwipeMode == 2
         val text = if (steps > 0) connection.getSelectedText(0) ?: return steps
-        else connection.getTextBeforeCursor(-steps * 4, 0) ?: return steps
-        return moveStepsToCharCount(text, steps)
+        else connection.getTextBeforeCursor(-steps * (if (wordMode) 50 else 4), 0) ?: return steps
+        return if (wordMode) com.youboard.keyboard.latin.common.WordDeletion.steps(text, steps,
+            settings.current.mLocale, settings.current.mSpacingAndPunctuations)
+        else moveStepsToCharCount(text, steps)
     }
 
     override fun onUpWithDeletePointerActive() {
