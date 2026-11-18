@@ -503,12 +503,9 @@ public final class EmojiPalettesView extends LinearLayout
     private void initDictionaryFacilitator() {
         if (Settings.getValues().mShowEmojiDescriptions) {
             var locale = RichInputMethodManager.getInstance().getCurrentSubtype().getLocale();
-            if (sDictionaryFacilitator == null || ! sDictionaryFacilitator.isForLocale(locale)) {
-                closeDictionaryFacilitator();
-                var dictFile = DictionaryInfoUtils.getCachedDictForLocaleAndType(locale, Dictionary.TYPE_EMOJI, getContext());
-                var dictionary = dictFile != null? DictionaryFactory.getDictionary(dictFile, locale) : null;
-                sDictionaryFacilitator = dictionary != null? new SingleDictionaryFacilitator(dictionary) : null;
-            }
+            // Opening the panel also refreshes secondary locales and imported dictionaries.
+            closeDictionaryFacilitator();
+            sDictionaryFacilitator = EmojiSearchActivity.createEmojiDictFacilitatorForCurrentSettings(getContext());
         } else {
             closeDictionaryFacilitator();
         }

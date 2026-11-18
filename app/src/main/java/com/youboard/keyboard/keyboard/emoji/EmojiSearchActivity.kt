@@ -445,12 +445,19 @@ class EmojiSearchActivity : ComponentActivity() {
         private fun encodePrivateImeOptions(privateImeOptions: PrivateImeOptions) =
             "$PRIVATE_IME_OPTIONS_PREFIX.${privateImeOptions.height},"
 
+        @JvmStatic
+        fun createEmojiDictFacilitatorForCurrentSettings(context: Context): SingleDictionaryFacilitator? =
+            DictionaryFactory.createEmojiDictionaryCollection(context, RichInputMethodManager.getInstance().currentSubtype.locale,
+                Settings.getValues().mSecondaryLocales)?.let { SingleDictionaryFacilitator(it) }
+
+        private var dictionaryLocales: List<java.util.Locale> = emptyList()
         private fun initDictionaryFacilitator(context: Context) {
             val locale = RichInputMethodManager.getInstance().currentSubtype.locale
-            if (dictionaryFacilitator?.isForLocale(locale) != true) {
+            val locales = (listOf(locale) + Settings.getValues().mSecondaryLocales).distinct()
+            if (dictionaryFacilitator?.isForLocale(locale) != true || dictionaryLocales != locales) {
+                dictionaryLocales = locales
                 dictionaryFacilitator?.closeDictionaries()
-                dictionaryFacilitator = DictionaryInfoUtils.getCachedDictForLocaleAndType(locale, Dictionary.TYPE_EMOJI, context)
-                    ?.let { DictionaryFactory.getDictionary(it, locale) }?.let { SingleDictionaryFacilitator(it) }
+                dictionaryFacilitator = createEmojiDictFacilitatorForCurrentSettings(context)
             }
         }
     }
