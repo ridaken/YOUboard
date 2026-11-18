@@ -21,7 +21,7 @@ Does not use internet permission, and thus is 100% offline.
 
 # Features
 <ul>
-  <li>Add dictionaries for suggestions and spell check</li>
+  <li>Add dictionaries for suggestions and spell check, including local import of .dict, .combined, and gzip-compressed .combined files</li>
   <ul>
     <li>build your own, or get them  <a href="https://codeberg.org/Helium314/aosp-dictionaries#dictionaries">here</a> (quality may vary)</li>
     <li>additional dictionaries for emojis or scientific symbols can be used to provide suggestions (similar to "emoji search")</li>
