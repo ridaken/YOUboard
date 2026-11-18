@@ -525,6 +525,14 @@ class SuggestTest {
         assertEquals(listOf("BUR", "BUT", "BUR", "BIT", "BUY", "😢", "BUTTER"), result4.mSuggestedWordInfoList.map { it.mWord })
     }
 
+    @Test fun capitalizedSwipeSuggestionsAreUnique() {
+        glideTypingSuggestions = suggestionResults(listOf(
+            suggestion("frank", 100), suggestion("Frank", 95), suggestion("frame", 90)
+        ))
+        val words = getSuggestedWords(true, "", CapsMode.AUTO).mSuggestedWordInfoList.map { it.mWord }
+        assertEquals(listOf("Frank", "Frame"), words)
+    }
+
     @Test fun `suggestions use manual caps modes`() {
         // added in https://github.com/HeliBorg/HeliBoard/pull/1807 / cb0eae695f0cbd061e5bbcc416d6e14d18d869d8
         // manual caps mode can be set any time, even if there are already suggestions
