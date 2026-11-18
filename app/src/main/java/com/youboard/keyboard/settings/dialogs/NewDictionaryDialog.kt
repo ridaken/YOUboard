@@ -7,6 +7,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.isActive
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import android.util.AtomicFile
+import com.youboard.keyboard.latin.makedict.DictIO
+import com.youboard.keyboard.latin.makedict.CombinedInputOutput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +55,36 @@ fun NewDictionaryDialog(
     cachedFile: File,
     mainLocale: Locale?
 ) {
-    val (error, header) = checkDict(cachedFile)
+    val preparedFile = remember(cachedFile) { File(cachedFile.parentFile, "prepared-" + java.util.UUID.randomUUID() + ".dict") }
+    var checked by remember(cachedFile) { mutableStateOf<Pair<Int?, DictionaryHeader?>?>(null) }
+    var installing by remember { mutableStateOf(false) }
+    var installError by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(cachedFile) {
+        try {
+            checked = withContext(Dispatchers.IO) {
+                runCatching {
+                    cachedFile.copyTo(preparedFile, overwrite = true)
+                    convertDictionary(preparedFile)
+                    checkDict(preparedFile)
+                }.getOrElse { R.string.dictionary_file_error to null }
+            }
+        } finally {
+            if (!isActive) withContext(NonCancellable + Dispatchers.IO) { preparedFile.delete() }
+        }
+    }
+    DisposableEffect(cachedFile) { onDispose { cachedFile.delete(); preparedFile.delete() } }
+    if (checked == null) {
+        AlertDialog(onDismissRequest = onDismissRequest,
+            title = { Text(stringResource(R.string.add_new_dictionary_title)) },
+            text = { CircularProgressIndicator() }, confirmButton = {})
+        return
+    }
+    val (error, header) = checked!!
+    if (installError) {
+        InfoDialog(stringResource(R.string.dictionary_load_error), onDismissRequest)
+        return
+    }
     if (error != null) {
         InfoDialog(stringResource(error), onDismissRequest)
         cachedFile.delete()
@@ -72,18 +114,33 @@ fun NewDictionaryDialog(
         val type = header.mIdString.substringBefore(":")
         val info = header.info(LocalConfiguration.current.locale())
         ThreeButtonAlertDialog(
-            onDismissRequest = { onDismissRequest(); cachedFile.delete() },
+            onDismissRequest = { if (!installing) onDismissRequest() },
             onConfirmed = {
-                dictFile.parentFile?.mkdirs()
-                dictFile.delete()
-                cachedFile.renameTo(dictFile)
-                if (type == Dictionary.TYPE_MAIN) {
-                    // replaced main dict, remove the one created from internal data
-                    val internalMainDictFile = File(cacheDir, DictionaryInfoUtils.MAIN_DICT_FILE_NAME)
-                    internalMainDictFile.delete()
+                if (!installing) {
+                    installing = true
+                    scope.launch {
+                        val success = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val target = AtomicFile(dictFile)
+                                val output = target.startWrite()
+                                try {
+                                    preparedFile.inputStream().use { it.copyTo(output) }
+                                    target.finishWrite(output)
+                                } catch (failure: Throwable) {
+                                    target.failWrite(output)
+                                    throw failure
+                                }
+                                if (type == Dictionary.TYPE_MAIN)
+                                    File(cacheDir, DictionaryInfoUtils.MAIN_DICT_FILE_NAME).delete()
+                            }.isSuccess
+                        }
+                        installing = false
+                        if (success) {
+                            ctx.sendBroadcast(Intent(DictionaryPackConstants.NEW_DICTIONARY_INTENT_ACTION).setPackage(ctx.packageName))
+                            onDismissRequest()
+                        } else installError = true
+                    }
                 }
-                val newDictBroadcast = Intent(DictionaryPackConstants.NEW_DICTIONARY_INTENT_ACTION)
-                ctx.sendBroadcast(newDictBroadcast)
             },
             confirmButtonText = stringResource(if (dictFile.exists()) R.string.replace_dictionary else android.R.string.ok),
             title = { Text(stringResource(R.string.add_new_dictionary_title)) },
@@ -128,9 +185,20 @@ private fun checkDict(file: File): Pair<Int?, DictionaryHeader?> {
 
     val locale = newHeader.mLocaleString.constructLocale()
     val dict = ReadOnlyBinaryDictionary(file.absolutePath, 0, file.length(), false, locale, "test")
-    if (!dict.isValidDictionary) {
-        dict.close()
-        return R.string.dictionary_load_error to null
-    }
-    return null to newHeader
+    return try {
+        if (dict.isValidDictionary) null to newHeader else R.string.dictionary_load_error to null
+    } finally { dict.close() }
+}
+
+private fun convertDictionary(file: File) {
+    if (DictionaryInfoUtils.getDictionaryFileHeaderOrNull(file) != null) return
+    val converted = File(file.parentFile, file.name + ".converted")
+    try {
+        val dictionary = if (CombinedInputOutput.isCombinedDictionary(file.path))
+            DictIO.readCombinedDictionary(file.path)
+        else DictIO.readCompressedCombinedDictionary(file.path)
+        DictIO.writeBinaryDictionary(converted.path, dictionary)
+        require(checkDict(converted).first == null)
+        converted.copyTo(file, overwrite = true)
+    } finally { converted.delete() }
 }

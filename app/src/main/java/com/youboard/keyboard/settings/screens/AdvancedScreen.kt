@@ -70,7 +70,7 @@ fun AdvancedSettingsScreen(
             Settings.PREF_TOUCHPAD_SENSITIVITY else null,
         if (Settings.readVerticalSpaceSwipe(prefs) == KeyboardActionListener.SwipeAction.TOUCHPAD_MODE)
             Settings.PREF_TOUCHPAD_EDGE_SCROLL else null,
-        Settings.PREF_DELETE_SWIPE,
+        Settings.PREF_DELETE_SWIPE_MODE,
         Settings.PREF_SPACE_TO_CHANGE_LANG,
         Settings.PREFS_LONG_PRESS_SYMBOLS_FOR_NUMPAD,
         Settings.PREF_ENABLE_EMOJI_ALT_PHYSICAL_KEY,
@@ -156,8 +156,13 @@ fun createAdvancedSettings(context: Context) = listOf(
     Setting(context, Settings.PREF_TOUCHPAD_EDGE_SCROLL, R.string.touchpad_edge_scroll, R.string.touchpad_edge_scroll_description) {
         SwitchPreference(it, Defaults.PREF_TOUCHPAD_EDGE_SCROLL)
     },
-    Setting(context, Settings.PREF_DELETE_SWIPE, R.string.delete_swipe, R.string.delete_swipe_summary) {
-        SwitchPreference(it, Defaults.PREF_DELETE_SWIPE)
+    Setting(context, Settings.PREF_DELETE_SWIPE_MODE, R.string.delete_swipe, R.string.delete_swipe_summary) {
+        val context = LocalContext.current
+        val items = listOf(stringResource(R.string.auto_correction_threshold_mode_off) to 0,
+            stringResource(R.string.delete_swipe_letters) to 1, stringResource(R.string.delete_swipe_words) to 2)
+        ListPreference(it, items, 1) { mode ->
+            com.youboard.keyboard.latin.settings.DeleteSwipeSettings.setMode(context.prefs(), mode)
+        }
     },
     Setting(context, Settings.PREF_SPACE_TO_CHANGE_LANG,
         R.string.prefs_long_press_keyboard_to_change_lang,

@@ -117,6 +117,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_EMOJI_SKIN_TONE = "emoji_skin_tone";
     public static final String PREF_SPACE_HORIZONTAL_SWIPE = "horizontal_space_swipe";
     public static final String PREF_SPACE_VERTICAL_SWIPE = "vertical_space_swipe";
+    public static final String PREF_DELETE_SWIPE_MODE = "delete_swipe_type";
     public static final String PREF_DELETE_SWIPE = "delete_swipe";
     public static final String PREF_AUTOSPACE_AFTER_PUNCTUATION = "autospace_after_punctuation";
     public static final String PREF_AUTOSPACE_AFTER_SUGGESTION = "autospace_after_suggestion";
@@ -173,6 +174,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_CLIPBOARD_USE_FILES = "clipboard_histor_usey_files";
     public static final String PREF_CLIPBOARD_FILES_SIZE_LIMIT = "clipboard_history_files_size_limit";
 
+    public static final String PREF_CONSERVATIVE_HISTORY = "conservative_history_learning";
     public static final String PREF_ADD_TO_PERSONAL_DICTIONARY = "add_to_personal_dictionary";
     public static final String PREF_NAVBAR_COLOR = "navbar_color";
     public static final String PREF_ENABLED_SUBTYPES = "enabled_subtypes";

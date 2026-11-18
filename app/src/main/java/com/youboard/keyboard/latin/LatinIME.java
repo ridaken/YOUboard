@@ -721,6 +721,7 @@ public class LatinIME extends InputMethodService implements
         if (!mHandler.hasPendingReopenDictionaries()) {
             resetDictionaryFacilitatorIfNecessary();
         }
+        mDictionaryFacilitator.onLearningPolicyChanged(currentSettingsValues.mConservativeHistory);
         refreshPersonalizationDictionarySession(currentSettingsValues);
         mInputLogic.mSuggest.clearNextWordSuggestionsCache();
         mInputLogic.updateEmojiDictionary(locale);
@@ -1403,7 +1404,7 @@ public class LatinIME extends InputMethodService implements
                 touchLeft = xy.component1();
                 touchTop = xy.component2();
                 touchRight = touchLeft + mSettings.getCurrent().mFloatingWidth;
-                touchBottom = touchTop + mSettings.getCurrent().mFloatingHeight + stripHeight + (int)FloatingKeyboardUtils.getFloatingHandleHeight(getResources());
+                touchBottom = touchTop + inputHeight;
             }
             outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_REGION;
             outInsets.touchableRegion.set(touchLeft, touchTop, touchRight, touchBottom);
@@ -1754,8 +1755,9 @@ public class LatinIME extends InputMethodService implements
      *  returns whether a clipboard suggestion has been set.
      */
     public boolean tryShowClipboardSuggestion() {
-        final View clipboardView = mClipboardHistoryManager.getClipboardSuggestionView(getCurrentInputEditorInfo(), mSuggestionStripView);
-        if (clipboardView != null && hasSuggestionStripView()) {
+        if (!hasSuggestionStripView()) return false;
+        View clipboardView = mClipboardHistoryManager.getClipboardSuggestionView(getCurrentInputEditorInfo(), mSuggestionStripView);
+        if (clipboardView != null) {
             mSuggestionStripView.setExternalSuggestionView(clipboardView, false);
             return true;
         }
@@ -1953,7 +1955,9 @@ public class LatinIME extends InputMethodService implements
     public void launchEmojiSearch() {
         Log.d("emoji-search", "before activity launch");
         startActivity(new Intent().setClass(this, EmojiSearchActivity.class)
-                          .putExtra(EmojiSearchActivity.SOURCE_INCOGNITO, mSettings.getCurrent().mIncognitoModeEnabled)
+                          .putExtra(EmojiSearchActivity.SOURCE_INCOGNITO, mSettings.getCurrent().mIncognitoModeEnabled
+                                  || mSettings.getCurrent().mInputAttributes.mIsPasswordField
+                                  || mSettings.getCurrent().mInputAttributes.mNoLearning)
                           .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_MULTIPLE_TASK));
     }
 

@@ -192,8 +192,20 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     /**
      * Closes and cleans up the binary dictionary.
      */
+    private volatile boolean sourceClosed;
+    private volatile long sourceVersion;
+
+    public synchronized void onSourceChanged() {
+        if (sourceClosed) return;
+        sourceVersion++;
+        setNeedsToRecreate();
+        reloadDictionaryIfRequired();
+    }
+
     @Override
-    public void close() {
+    public synchronized void close() {
+        sourceClosed = true;
+        DictionarySourceMonitor.detach(this);
         asyncExecuteTaskWithWriteLock(this::closeBinaryDictionary);
     }
 
@@ -520,6 +532,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         }
         final File dictFile = mDictFile;
         asyncExecuteTaskWithWriteLock(() -> {
+            final long versionAtStart = sourceVersion;
             try {
                 if (!dictFile.exists() || isNeededToRecreate()) {
                     // If the dictionary file does not exist or contents have been updated,
@@ -538,9 +551,12 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
                         createNewDictionaryLocked();
                     }
                 }
-                clearNeedsToRecreate();
+                if (versionAtStart == sourceVersion) clearNeedsToRecreate();
+                if (TYPE_USER.equals(mDictType) || TYPE_CONTACTS.equals(mDictType) || TYPE_APPS.equals(mDictType))
+                    DictionarySourceMonitor.onReloaded();
             } finally {
                 isReloading.set(false);
+                if (!sourceClosed && sourceVersion != versionAtStart) reloadDictionaryIfRequired();
             }
         });
     }

@@ -49,7 +49,7 @@ public class ContactsBinaryDictionary extends ExpandableBinaryDictionary
                 dictFile);
         mUseFirstLastBigrams = ContactsDictionaryUtils.useFirstLastBigramsForLocale(locale);
         mContactsManager = new ContactsManager(context);
-        mContactsManager.registerForUpdates(this /* listener */);
+        DictionarySourceMonitor.attach(this);
         reloadDictionaryIfRequired();
     }
 
@@ -60,7 +60,6 @@ public class ContactsBinaryDictionary extends ExpandableBinaryDictionary
 
     @Override
     public synchronized void close() {
-        mContactsManager.close();
         super.close();
     }
 

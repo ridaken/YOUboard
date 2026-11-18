@@ -100,7 +100,7 @@ fun DictionaryDialog(
         onNeutral = {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("application/octet-stream")
+                .setType("*/*") // Wordlists may be plain text or gzip as well as binary dictionaries.
             picker.launch(intent)
         }
     )

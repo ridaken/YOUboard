@@ -453,6 +453,8 @@
     <string name="custom_font">Set custom font from file</string>
     <!-- Title of the setting for adding / removing custom font file used only for emojis -->
     <string name="custom_emoji_font">Set custom emoji font from file</string>
+    <!-- Message when clearing recent emojis by long pressing the recents tab icon -->
+    <string name="recent_emojis_cleared">Cleared recent emojis</string>
     <!-- Description for English (UK) keyboard subtype
          (UK) should be an abbreviation of United Kingdom. -->
     <string name="subtype_en_GB">English (UK)</string>
@@ -1342,4 +1344,8 @@ New dictionary:
     <string name="gesture_data_swipe_o_scope">Tool for visualizing gesture data: &lt;a href=%s&gt;Swipe-O-Scope&lt;/a&gt;</string>
 
     <!-- new strings should go above the section for gesture data gathering -->
+    <string name="conservative_history_learning">Conservative history learning</string>
+    <string name="conservative_history_learning_summary">Wait 25 seconds before learning words so quick corrections can cancel learning. Existing learned words are preserved.</string>
+    <string name="delete_swipe_letters">Letters</string>
+    <string name="delete_swipe_words">Words</string>
 </resources>

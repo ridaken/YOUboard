@@ -150,3 +150,8 @@ Customizing functional keys mostly works like other layouts, with some specific 
   * more symbols will fall back to symbols, then normal
   * symbols will fall back to normal, then default (if you only customized more symbols functional layout)
   * normal will fall back to default (if you only customized symbols and/or more symbols functional layout)
+
+
+### Delete a word
+
+Custom keys may use `"code": -8` (`DELETE_WORD`) to delete the preceding word boundary segment. Whitespace is a separate segment. Ordinary backspace remains unchanged. Swipe deletion offers Off, Letters, and Words in Advanced settings; upgrading preserves existing Off/Letters choices.

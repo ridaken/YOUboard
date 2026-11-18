@@ -207,8 +207,9 @@ class ClipboardHistoryManager(
         if (hasText) {
             if (TextUtils.isEmpty(content)) return null
             if (InputTypeUtils.isNumberInputType(inputType) && !content.isValidNumber()) return null
+            val shortenedContent = content.take(200) // for display only
             KeyboardTypeface.applyToTextView(textView)
-            textView.text = (if (isClipSensitive(inputType)) "*".repeat(content.length.coerceAtMost(200)) else content)
+            textView.text = (if (isClipSensitive(inputType)) "*".repeat(shortenedContent.length) else shortenedContent)
         }
         val onClickListener = View.OnClickListener {
             dontShowCurrentSuggestion = true
@@ -235,8 +236,10 @@ class ClipboardHistoryManager(
 
         val closeButton = binding.clipboardSuggestionClose
         closeButton.setImageDrawable(KeyboardIconsSet.instance.getIconDrawable(ToolbarKey.CLOSE_HISTORY.name.lowercase()))
-        closeButton.layoutParams.width = textView.lineHeight // scale the icon to the text
-        closeButton.layoutParams.height = textView.lineHeight
+        // Keep the full button target; inset only the image.
+        closeButton.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+        val inset = (closeButton.resources.getDimension(R.dimen.config_suggestions_strip_height) * 0.1f).toInt()
+        closeButton.setPadding(inset, inset, inset, inset)
         closeButton.setOnClickListener { removeClipboardSuggestion() }
 
         val colors = latinIME.mSettings.current.mColors

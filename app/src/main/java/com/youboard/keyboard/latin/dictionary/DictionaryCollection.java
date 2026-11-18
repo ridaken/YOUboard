@@ -7,6 +7,7 @@
 package com.youboard.keyboard.latin.dictionary;
 
 import com.youboard.keyboard.latin.NgramContext;
+import com.youboard.keyboard.latin.makedict.WordProperty;
 import com.youboard.keyboard.latin.SuggestedWords.SuggestedWordInfo;
 import com.youboard.keyboard.latin.common.ComposedData;
 import com.youboard.keyboard.latin.settings.SettingsValuesForSuggestion;
@@ -87,6 +88,15 @@ public final class DictionaryCollection extends Dictionary {
             maxFreq = Math.max(tempFreq, maxFreq);
         }
         return maxFreq;
+    }
+
+    @Override
+    public WordProperty getWordProperty(String word, boolean isBeginningOfSentence) {
+        for (Dictionary dictionary : mDictionaries) {
+            WordProperty property = dictionary.getWordProperty(word, isBeginningOfSentence);
+            if (property != null) return property;
+        }
+        return null;
     }
 
     @Override

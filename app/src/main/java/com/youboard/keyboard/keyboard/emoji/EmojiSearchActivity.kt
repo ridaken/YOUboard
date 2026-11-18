@@ -304,8 +304,8 @@ class EmojiSearchActivity : ComponentActivity() {
             else
                 Character.toString(it.code))
 
-            KeyboardSwitcher.getInstance().emojiPalettesView.addRecentKey(
-                it, this.intent.getBooleanExtra(SOURCE_INCOGNITO, false))
+            val emoji = if (it.code == KeyCode.MULTIPLE_CODE_POINTS) it.getOutputText() else Character.toString(it.code)
+            if (!this.intent.getBooleanExtra(SOURCE_INCOGNITO, false) && emoji != null) RecentEmojis.add(emoji)
         }
         startService(intent)
         super.onStop()
@@ -347,6 +347,8 @@ class EmojiSearchActivity : ComponentActivity() {
                 pressedKey = key
                 finish()
             }
+
+            override fun onRemoveRecentsKey(key: Key?) {}
 
             override fun getDescription(emoji: String): String? = if (Settings.getValues().mShowEmojiDescriptions)
                 EmojiSearchRepository.description(getEmojiNeutralVersion(emoji))
@@ -443,12 +445,19 @@ class EmojiSearchActivity : ComponentActivity() {
         private fun encodePrivateImeOptions(privateImeOptions: PrivateImeOptions) =
             "$PRIVATE_IME_OPTIONS_PREFIX.${privateImeOptions.height},"
 
+        @JvmStatic
+        fun createEmojiDictFacilitatorForCurrentSettings(context: Context): SingleDictionaryFacilitator? =
+            DictionaryFactory.createEmojiDictionaryCollection(context, RichInputMethodManager.getInstance().currentSubtype.locale,
+                Settings.getValues().mSecondaryLocales)?.let { SingleDictionaryFacilitator(it) }
+
+        private var dictionaryLocales: List<java.util.Locale> = emptyList()
         private fun initDictionaryFacilitator(context: Context) {
             val locale = RichInputMethodManager.getInstance().currentSubtype.locale
-            if (dictionaryFacilitator?.isForLocale(locale) != true) {
+            val locales = (listOf(locale) + Settings.getValues().mSecondaryLocales).distinct()
+            if (dictionaryFacilitator?.isForLocale(locale) != true || dictionaryLocales != locales) {
+                dictionaryLocales = locales
                 dictionaryFacilitator?.closeDictionaries()
-                dictionaryFacilitator = DictionaryInfoUtils.getCachedDictForLocaleAndType(locale, Dictionary.TYPE_EMOJI, context)
-                    ?.let { DictionaryFactory.getDictionary(it, locale) }?.let { SingleDictionaryFacilitator(it) }
+                dictionaryFacilitator = createEmojiDictFacilitatorForCurrentSettings(context)
             }
         }
     }

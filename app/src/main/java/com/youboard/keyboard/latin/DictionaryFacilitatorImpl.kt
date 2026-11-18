@@ -79,6 +79,18 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
     private var mValidSpellingWordReadCache: LruCache<String, Boolean>? = null
     private var mValidSpellingWordWriteCache: LruCache<String, Boolean>? = null
 
+    private var learningPrefs: android.content.SharedPreferences? = null
+    private val learningPreferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == Settings.PREF_CONSERVATIVE_HISTORY || key == Settings.PREF_KEY_USE_PERSONALIZED_DICTS
+            || key == Settings.PREF_ALWAYS_INCOGNITO_MODE) pendingHistory.clear()
+    }
+    private val pendingHistory = PendingHistoryQueue()
+    private var conservativeHistory = false
+    override fun onLearningPolicyChanged(enabled: Boolean) {
+        if (conservativeHistory != enabled) pendingHistory.clear()
+        conservativeHistory = enabled
+    }
+
     private val scope = CoroutineScope(Dispatchers.Default)
 
     override fun setValidSpellingWordReadCache(cache: LruCache<String, Boolean>) {
@@ -95,6 +107,10 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
     }
 
     override fun onStartInput() {
+        val values = Settings.getValues() ?: return
+        onLearningPolicyChanged(values.mConservativeHistory)
+        if (values.mIncognitoModeEnabled || values.mInputAttributes.mIsPasswordField || values.mInputAttributes.mNoLearning)
+            pendingHistory.clear()
     }
 
     override fun onFinishInput() {
@@ -136,6 +152,14 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         dictNamePrefix: String,
         listener: DictionaryInitializationListener?
     ) {
+        pendingHistory.clear()
+        val prefs = context.prefs()
+        if (learningPrefs !== prefs) {
+            learningPrefs?.unregisterOnSharedPreferenceChangeListener(learningPreferenceListener)
+            learningPrefs = prefs
+            prefs.registerOnSharedPreferenceChangeListener(learningPreferenceListener)
+        }
+        onLearningPolicyChanged(prefs.getBoolean(Settings.PREF_CONSERVATIVE_HISTORY, false))
         Log.i(TAG, "resetDictionaries, force reloading main dictionary: $forceReloadMainDictionary")
 
         val locales = getUsedLocales(newLocale, context)
@@ -263,6 +287,9 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
     }
 
     override fun closeDictionaries() {
+        pendingHistory.clear()
+        learningPrefs?.unregisterOnSharedPreferenceChangeListener(learningPreferenceListener)
+        learningPrefs = null
         onFinishInput() // the dictionaries will save updates to file
         val dictionaryGroupsToClose: List<DictionaryGroup>
         synchronized(this) {
@@ -294,6 +321,10 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         suggestion: String, wasAutoCapitalized: Boolean, ngramContext: NgramContext,
         timeStampInSeconds: Long, blockPotentiallyOffensive: Boolean
     ) {
+        onLearningPolicyChanged(Settings.getValues().mConservativeHistory)
+        if (conservativeHistory && (Settings.getValues().mIncognitoModeEnabled || Settings.getValues().mInputAttributes.mIsPasswordField
+                || Settings.getValues().mInputAttributes.mNoLearning)) return
+        if (conservativeHistory && wasAutoCapitalized && !ngramContext.isBeginningOfSentenceContext) return
         // Update the spelling cache before learning. Words that are not yet added to user history
         // and appear in no other language model are not considered valid.
         putWordIntoValidSpellingWordCache("addToUserHistory", suggestion)
@@ -301,7 +332,7 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         val words = suggestion.splitOnWhitespace().dropLastWhile { it.isEmpty() }
 
         // increase / decrease confidence
-        if (words.size == 1) // ignore if more than a single word, which only happens with (badly working) spaceAwareGesture
+        if (!conservativeHistory && words.size == 1) // ignore if more than a single word, which only happens with (badly working) spaceAwareGesture
             adjustConfidences(suggestion, wasAutoCapitalized)
 
         // Add word to user dictionary if it is in no other dictionary except user history dictionary (i.e. typed again).
@@ -322,16 +353,19 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
             val wasCurrentWordAutoCapitalized = (i == 0) && wasAutoCapitalized
             // add to history for preferred dictionary group, to avoid mixing languages in history
             addWordToUserHistory(
-                preferredGroup, ngramContextForCurrentWord, currentWord,
+                (if (conservativeHistory) findDictGroupForAddingWord(currentWord, wasCurrentWordAutoCapitalized,
+                    ngramContextForCurrentWord.isBeginningOfSentenceContext) else preferredGroup) ?: continue,
+                ngramContextForCurrentWord, currentWord,
                 wasCurrentWordAutoCapitalized, timeStampInSeconds.toInt(), blockPotentiallyOffensive
             )
             ngramContextForCurrentWord = ngramContextForCurrentWord.getNextNgramContext(WordInfo(currentWord))
 
             // remove manually entered blacklisted words from blacklist for likely matching languages
-            dictionaryGroups.filter { it.confidence == preferredGroup.confidence }.forEach {
+            dictionaryGroups.filter { !conservativeHistory && it.confidence == preferredGroup.confidence }.forEach {
                 it.removeFromBlacklist(currentWord)
             }
         }
+        if (conservativeHistory && words.size == 1) adjustConfidences(suggestion, wasAutoCapitalized)
     }
 
     private fun addWordToUserHistory(
@@ -343,6 +377,17 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         val mainFreq = dictionaryGroup.getDict(Dictionary.TYPE_MAIN)?.getFrequency(word) ?: Dictionary.NOT_A_PROBABILITY
         if (mainFreq == 0 && blockPotentiallyOffensive)
             return
+        if (conservativeHistory) {
+            val learned = determineWordToUse(word, wasAutoCapitalized || ngramContext.isBeginningOfSentenceContext, dictionaryGroup) ?: return
+            pendingHistory.add(dictionaryGroup.locale, word, learned) {
+                val current = Settings.getValues()
+                if (!current.mConservativeHistory || !current.mUsePersonalizedDicts || current.mIncognitoModeEnabled
+                    || current.mInputAttributes.mIsPasswordField || current.mInputAttributes.mNoLearning) return@add
+                dictionaryGroups.filter { it === dictionaryGroup }.forEach { it.removeFromBlacklist(word) }
+                UserHistoryDictionary.addToDictionary(userHistoryDictionary, ngramContext, learned, mainFreq > 0, timeStampInSeconds)
+            }
+            return
+        }
         if (tryChangingWords)
             tryChangingWords = ngramContext.changeWordIfAfterBeginningOfSentence(changeFrom, changeTo)
 
@@ -391,6 +436,74 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         UserHistoryDictionary.addToDictionary(userHistoryDictionary, ngramContext, wordToUse, isValid, timeStampInSeconds)
     }
 
+    private fun findDictGroupForAddingWord(word: String, wasAutoCapitalized: Boolean, isBeginningOfSentence: Boolean): DictionaryGroup? {
+        if (dictionaryGroups.size == 1) return dictionaryGroups[0]
+        val requiredConfidence = currentlyPreferredDictionaryGroup.confidence - 1
+        val maybe = if (isBeginningOfSentence) dictionaryGroups // we expect user is more likely to switch language here, so we consider all groups
+            else dictionaryGroups.filter { it.confidence >= requiredConfidence } // avoid potentially unwanted switches in the middle of a sentence
+        if (maybe.isEmpty()) return null
+
+        // if we're considering only a single locale, use that
+        // this will could be unwanted if we're changing language, but also the user might want a foreign word for that language
+        if (maybe.size == 1) return maybe[0]
+
+        // we could try finding the most suitable dict group if the word was capitalized too,
+        // but that's a lot of effort and danger of adding words incorrectly for little gain (todo: maybe later)
+        return if ((wasAutoCapitalized || isBeginningOfSentence) && Character.isUpperCase(word.codePointAt(0))) null
+        else maybe.filter { isValidWord(word, DictionaryFacilitator.ALL_DICTIONARY_TYPES, it) }
+            .maxByOrNull { it.confidence }
+    }
+
+    private fun determineWordToUse(word: String, wasAutoCapitalizedOrIsBeginningOfSentence: Boolean, dictionaryGroup: DictionaryGroup): String? {
+        // Check for isBeginningOfSentenceContext too, because not all text fields auto-capitalize in this case.
+        // Even if the user capitalizes manually, they most likely don't want the capitalized form suggested.
+        if (wasAutoCapitalizedOrIsBeginningOfSentence && Character.isUpperCase(word.codePointAt(0))) {
+            val decapitalizedWord = word.decapitalize(dictionaryGroup.locale) // try undoing auto-capitalization
+            val wordValid = isValidWord(word, DictionaryFacilitator.ALL_DICTIONARY_TYPES, dictionaryGroup)
+            val decapitalizedValid = isValidWord(decapitalizedWord, DictionaryFacilitator.ALL_DICTIONARY_TYPES, dictionaryGroup)
+            if (wordValid && !decapitalizedValid) {
+                // If the word was auto-capitalized and exists only as a capitalized word in the
+                // dictionary, then we must not downcase it before registering it. For example,
+                // the name of the contacts in start-of-sentence position would come here with the
+                // wasAutoCapitalized flag: if we downcase it, we'd register a lower-case version
+                // of that contact's name which would end up popping in suggestions.
+                return word
+            } else if (!wordValid && decapitalizedValid) {
+                // If however the word is not in the dictionary, but exists as a de-capitalized word
+                // only, then we consider that was a lower-case word that had been auto-capitalized.
+                // todo: in this case the capitalized word will still be in the ngram for the following words, which messes with the next word suggestions
+                //  but this should be improved in the native library once we remove loading the google library
+                return decapitalizedWord
+            } else {
+                // if both or neither are valid, we check whether any of those forms were already typed by the user
+                val histDict = dictionaryGroup.getDict(Dictionary.TYPE_USER_HISTORY) ?: return null
+                val wordInHistory = histDict.isInDictionary(word)
+                val decapitalizedInHistory = histDict.isInDictionary(decapitalizedWord)
+                if (wordInHistory && !decapitalizedInHistory) return word
+                else if (!wordInHistory && decapitalizedInHistory) return decapitalizedWord
+            }
+            return null // can't determine reliably enough, better add nothing (wasAutoCapitalizedOrIsBeginningOfSentence is unusual anyway)
+        } else {
+            val lowerCasedWord = word.lowercase(dictionaryGroup.locale)
+            if (lowerCasedWord == word) return word
+
+            // HACK: We'd like to avoid adding the capitalized form of common words to the User
+            // History dictionary in order to avoid suggesting them until the dictionary
+            // consolidation is done.
+            // TODO: Remove this hack when ready.
+            // todo: this is actually pretty bad for languages with a lot of uppercase words like German
+            val lowerCaseFreqInMainDict = dictionaryGroup.getDict(Dictionary.TYPE_MAIN)?.getFrequency(lowerCasedWord)
+                ?: Dictionary.NOT_A_PROBABILITY
+            val mainFreq = dictionaryGroup.getDict(Dictionary.TYPE_MAIN)?.getFrequency(word) ?: Dictionary.NOT_A_PROBABILITY
+            return if (mainFreq < lowerCaseFreqInMainDict && lowerCaseFreqInMainDict >= CAPITALIZED_FORM_MAX_PROBABILITY_FOR_INSERT) {
+                // Use lower cased word as the word can be a distracter of the popular word.
+                lowerCasedWord
+            } else {
+                word
+            }
+        }
+    }
+
     private fun addToPersonalDictionaryIfInvalidButInHistory(word: String) {
         if (word.length <= 1) return
         val dictionaryGroup = clearlyPreferredDictionaryGroup ?: return
@@ -437,6 +550,8 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
         if (dictionaryGroups.size == 1 || word.contains(Constants.WORD_SEPARATOR))
             return
 
+        if (conservativeHistory && isValidWord(word, arrayOf(Dictionary.TYPE_APPS, Dictionary.TYPE_CONTACTS), dictionaryGroups[0])) return
+
         // if suggestion was auto-capitalized, check against both the suggestion and the de-capitalized suggestion
         val decapitalizedSuggestion = if (wasAutoCapitalized) word.decapitalize(currentLocale) else word
         val validWord = dictionaryGroups.map { isValidWord(word, DictionaryFacilitator.ALL_DICTIONARY_TYPES, it) }
@@ -473,7 +588,9 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
     override fun unlearnFromUserHistory(word: String, ngramContext: NgramContext,
                     timeStampInSeconds: Long, event: DictionaryFacilitator.UnlearnEvent) {
         // TODO: Decide whether or not to remove the word on BACKSPACE.
-        if (event != DictionaryFacilitator.UnlearnEvent.BACKSPACE) {
+        if (conservativeHistory) {
+            pendingHistory.cancelLatest(currentlyPreferredDictionaryGroup.locale, word)
+        } else if (event != DictionaryFacilitator.UnlearnEvent.BACKSPACE) {
             currentlyPreferredDictionaryGroup.getSubDict(Dictionary.TYPE_USER_HISTORY)?.removeUnigramEntryDynamically(word)
         }
 
@@ -585,12 +702,14 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
     private fun isBlacklisted(word: String): Boolean = dictionaryGroups.any { it.isBlacklisted(word) }
 
     override fun removeWord(word: String) {
+        pendingHistory.forget(word)
         for (dictionaryGroup in dictionaryGroups) {
             dictionaryGroup.removeWord(word)
         }
     }
 
     override fun clearUserHistoryDictionary(context: Context) {
+        pendingHistory.clear()
         for (dictionaryGroup in dictionaryGroups) {
             dictionaryGroup.getSubDict(Dictionary.TYPE_USER_HISTORY)?.clear()
         }

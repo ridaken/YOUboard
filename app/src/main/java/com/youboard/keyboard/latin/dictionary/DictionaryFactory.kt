@@ -29,6 +29,15 @@ object DictionaryFactory {
         return DictionaryCollection(Dictionary.TYPE_MAIN, locale, dicts, FloatArray(dicts.size) { 1f })
     }
 
+    @JvmStatic
+    fun createEmojiDictionaryCollection(context: Context, locale: Locale, otherLocales: Collection<Locale>): DictionaryCollection? {
+        val dicts = (listOf(locale) + otherLocales).distinct().mapNotNull { language ->
+            com.youboard.keyboard.latin.utils.DictionaryInfoUtils.getCachedDictForLocaleAndType(language, Dictionary.TYPE_EMOJI, context)
+                ?.let { getDictionary(it, language) }
+        }
+        return if (dicts.isEmpty()) null else DictionaryCollection(Dictionary.TYPE_EMOJI, locale, dicts, FloatArray(dicts.size) { 1f })
+    }
+
     fun getMainDictsForLocale(context: Context, locale: Locale, useEmojiDict: Boolean): List<Dictionary> {
         val dictList = LinkedList<Dictionary>()
         val (extracted, nonExtracted) = getAvailableDictsForLocale(locale, context, useEmojiDict)
