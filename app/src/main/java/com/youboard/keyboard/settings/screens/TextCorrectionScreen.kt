@@ -89,6 +89,7 @@ fun TextCorrectionScreen(
         if (suggestionsEnabled || autocorrectEnabled) Settings.PREF_SUGGEST_EMOJIS else null,
         if (suggestionsEnabled || autocorrectEnabled) Settings.PREF_INLINE_EMOJI_SEARCH else null,
         Settings.PREF_KEY_USE_PERSONALIZED_DICTS,
+        if (prefs.getBoolean(Settings.PREF_KEY_USE_PERSONALIZED_DICTS, Defaults.PREF_KEY_USE_PERSONALIZED_DICTS)) Settings.PREF_CONSERVATIVE_HISTORY else null,
         Settings.PREF_BIGRAM_PREDICTIONS,
         Settings.PREF_SUGGEST_PUNCTUATION,
         if (prefs.getBoolean(Settings.PREF_SUGGEST_PUNCTUATION, Defaults.PREF_SUGGEST_PUNCTUATION))
@@ -216,6 +217,9 @@ fun createCorrectionSettings(context: Context) = listOf(
         R.string.prefs_always_show_suggestions_except_web_text, R.string.prefs_always_show_suggestions_except_web_text_summary
     ) {
         SwitchPreference(it, Defaults.PREF_ALWAYS_SHOW_SUGGESTIONS_EXCEPT_WEB_TEXT)
+    },
+    Setting(context, Settings.PREF_CONSERVATIVE_HISTORY, R.string.conservative_history_learning, R.string.conservative_history_learning_summary) {
+        SwitchPreference(it, Defaults.PREF_CONSERVATIVE_HISTORY)
     },
     Setting(context, Settings.PREF_KEY_USE_PERSONALIZED_DICTS,
         R.string.use_personalized_dicts, R.string.use_personalized_dicts_summary

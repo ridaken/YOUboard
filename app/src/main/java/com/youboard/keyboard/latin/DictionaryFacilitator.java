@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
  * DictionaryFacilitator as a client for interacting with dictionaries.
  */
 public interface DictionaryFacilitator {
+    default void onLearningPolicyChanged(boolean enabled) {}
 
     String[] ALL_DICTIONARY_TYPES = new String[] {
             Dictionary.TYPE_MAIN,

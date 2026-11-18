@@ -141,3 +141,5 @@ This project is funded through [NGI Mobifree Fund](https://nlnet.nl/mobifree), a
 [<img src="https://nlnet.nl/logo/banner.png" alt="NLnet foundation logo" width="20%" />](https://nlnet.nl)
 
 Further the project benefits from donations provided by many users (thank you all!).
+
+**Conservative history learning** is an opt-in Text correction setting, available with personalized learning. It waits 25 seconds before recording eligible words, allowing quick corrections to cancel the latest occurrence without removing established vocabulary. It is off by default and does not change Always replace rules or correction feedback.
