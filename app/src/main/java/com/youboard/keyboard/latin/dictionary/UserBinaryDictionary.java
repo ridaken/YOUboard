@@ -69,13 +69,7 @@ public class UserBinaryDictionary extends ExpandableBinaryDictionary {
         }
         mAlsoUseMoreRestrictiveLocales = alsoUseMoreRestrictiveLocales;
 
-        mObserver = new ContentObserver(null) {
-            @Override
-            public void onChange(final boolean self, final Uri uri) {
-                setNeedsToRecreate();
-            }
-        };
-        context.getContentResolver().registerContentObserver(Words.CONTENT_URI, true, mObserver);
+        DictionarySourceMonitor.attach(this);
         reloadDictionaryIfRequired();
     }
 

@@ -30,7 +30,7 @@ public class AppsBinaryDictionary extends ExpandableBinaryDictionary implements 
             final File dictFile, final String name) {
         super(ctx, getDictName(name, locale, dictFile), locale, Dictionary.TYPE_APPS, dictFile);
         mAppsManager = new AppsManager(ctx);
-        mAppsManager.registerForUpdates(this);
+        DictionarySourceMonitor.attach(this);
         reloadDictionaryIfRequired();
     }
 
@@ -41,7 +41,6 @@ public class AppsBinaryDictionary extends ExpandableBinaryDictionary implements 
 
     @Override
     public synchronized void close() {
-        mAppsManager.close();
         super.close();
     }
 

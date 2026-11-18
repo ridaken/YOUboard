@@ -442,8 +442,15 @@ class Suggest(
     }
 
     /** get suggestions based on the current ngram context, with an empty typed word (that's what next word suggestions do)  */
+    private var sourceGeneration = -1L
+
     private fun getNextWordSuggestions(ngramContext: NgramContext, keyboard: Keyboard, inputStyle: Int,
                                        settingsValuesForSuggestion: SettingsValuesForSuggestion): SuggestionResults {
+        val generation = com.youboard.keyboard.latin.dictionary.DictionarySourceMonitor.generation()
+        if (generation != sourceGeneration) {
+            clearNextWordSuggestionsCache()
+            sourceGeneration = generation
+        }
         val cachedResults = nextWordSuggestionsCache[ngramContext]
         if (cachedResults != null) return cachedResults
         val newResults = mDictionaryFacilitator.getSuggestionResults(ComposedData(InputPointers(1),
