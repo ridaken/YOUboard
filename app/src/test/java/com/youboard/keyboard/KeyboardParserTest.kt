@@ -549,6 +549,31 @@ f""", // no newline at the end
         LayoutParser.parseSimpleString("a|!code/-11000").flatMap { row -> row.mapNotNull { it.compute(params) } }.single()
     }
 
+    // Regression coverage adapted from HeliBoard e2cadcb3b5b78507a7081d7c6e804171b537c5d0.
+    @Test fun placeholderAsOnlyPopup() {
+        val keyParams = LayoutParser.parseJsonString("""[[{ "label": "ক", "popup": { "relevant": [
+            { "type": "placeholder" }
+        ] } }]]""").flatMap { row -> row.mapNotNull { it.compute(params)?.toKeyParams(params) } }.single()
+        assertEquals(null, keyParams.mPopupKeys)
+        keyParams.mAbsoluteWidth = 1f
+        keyParams.mAbsoluteHeight = 1f
+        val key = keyParams.createKey()
+        assertEquals(false, key.isLongPressEnabled)
+    }
+
+    @Test fun placeholderNextToOtherPopup() {
+        val keyParams = LayoutParser.parseJsonString("""[[{ "label": "ক", "popup": { "relevant": [
+            { "type": "placeholder" }, { "label": "k" }
+        ] } }]]""").flatMap { row -> row.mapNotNull { it.compute(params)?.toKeyParams(params) } }.single()
+        assertEquals(1, keyParams.mPopupKeys?.size)
+        assertEquals("k", keyParams.mPopupKeys?.single()?.mLabel)
+        keyParams.mAbsoluteWidth = 1f
+        keyParams.mAbsoluteHeight = 1f
+        val key = keyParams.createKey()
+        assertEquals(true, key.isLongPressEnabled)
+        assertEquals('k'.code, key.popupKeys?.single()?.mCode)
+    }
+
     private data class Expected(
         val code: Int,
         val label: String? = null,
